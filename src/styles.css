@@ -1,0 +1,231 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #050810;
+  --panel: #0c1220;
+  --panel-2: #111a2e;
+  --border: #1b2742;
+  --text: #e6edff;
+  --muted: #8a97b8;
+  --accent: #6ee7b7;
+  --accent-2: #38bdf8;
+  --warn: #f59e0b;
+  --crit: #ef4444;
+  --ok: #22c55e;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: radial-gradient(1200px 600px at 70% -10%, #0e1a35 0%, var(--bg) 60%);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; }
+
+.app-shell { min-height: 100vh; display: flex; flex-direction: column; }
+
+/* ---------- Landing ---------- */
+.landing {
+  position: relative;
+  height: 100vh;
+  overflow: hidden;
+}
+.landing__globe { position: absolute; inset: 0; }
+.landing__overlay {
+  position: relative;
+  z-index: 2;
+  padding: 32px 40px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  pointer-events: none;
+}
+.landing__overlay > * { pointer-events: auto; }
+.landing__title { font-size: 28px; letter-spacing: 0.16em; font-weight: 600; }
+.landing__sub { color: var(--muted); margin-top: 6px; max-width: 560px; }
+.landing__pitch {
+  margin-top: auto;
+  background: rgba(8,12,24,0.7);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px 22px;
+  max-width: 560px;
+}
+.landing__theaters {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.theater-chip {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+.theater-chip[data-active="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ---------- Workbench ---------- */
+.workbench {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  grid-template-rows: 56px 1fr 220px;
+  height: 100vh;
+  gap: 1px;
+  background: var(--border);
+}
+.wb-header {
+  grid-column: 1 / -1;
+  background: var(--panel);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 18px;
+}
+.wb-header__title { font-weight: 600; letter-spacing: 0.12em; }
+.wb-header__theater { color: var(--muted); font-size: 13px; }
+.wb-header__spacer { flex: 1; }
+.link-button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.link-button:hover { color: var(--text); border-color: var(--text); }
+
+.wb-stage {
+  background: var(--panel);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wb-stage__placeholder {
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 28px 36px;
+  color: var(--muted);
+  text-align: center;
+}
+.wb-stage__placeholder strong { color: var(--text); display: block; margin-bottom: 6px; }
+
+.wb-side {
+  background: var(--panel);
+  overflow-y: auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.wb-bottom {
+  grid-column: 1 / -1;
+  background: var(--panel);
+  overflow-x: auto;
+  padding: 14px 18px;
+}
+
+.section { display: flex; flex-direction: column; gap: 10px; }
+.section__title {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.section__desc { font-size: 12px; color: var(--muted); }
+
+/* ---------- Vehicle picker ---------- */
+.vehicle-picker { display: flex; gap: 10px; }
+.vehicle-card {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vehicle-card[data-active="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.vehicle-card__title { font-weight: 600; font-size: 14px; }
+.vehicle-card__sub { font-size: 12px; color: var(--muted); }
+
+/* ---------- Condition controls ---------- */
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field__row { display: flex; justify-content: space-between; font-size: 12px; }
+.field__label { color: var(--muted); }
+.field__value { color: var(--text); font-variant-numeric: tabular-nums; }
+.field input[type="range"] { width: 100%; accent-color: var(--accent-2); }
+
+.choice-group { display: flex; gap: 6px; }
+.choice-button {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.choice-button[data-active="true"] {
+  background: rgba(56,189,248,0.12);
+  border-color: var(--accent-2);
+  color: var(--text);
+}
+
+/* ---------- Metrics panel ---------- */
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.metric__label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+.metric__value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.metric__bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.metric__bar > div { height: 100%; background: var(--accent); }
+.metric[data-tone="watch"] .metric__bar > div { background: var(--warn); }
+.metric[data-tone="critical"] .metric__bar > div { background: var(--crit); }
+
+/* ---------- Assessment cards ---------- */
+.cards { display: flex; gap: 10px; min-width: 100%; }
+.card {
+  min-width: 280px;
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--ok);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.card[data-severity="yellow"] { border-left-color: var(--warn); }
+.card[data-severity="red"] { border-left-color: var(--crit); }
+.card__title { font-weight: 600; font-size: 13px; }
+.card__why { font-size: 12px; color: var(--muted); }
+.card__action { font-size: 12px; color: var(--accent); }
