@@ -26,6 +26,30 @@ body {
 button { font: inherit; color: inherit; cursor: pointer; }
 img { display: block; }
 
+.app-shell {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+}
+.app-route-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+.app-route-layer[data-active="true"] {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+.app-route-layer--mission {
+  z-index: 2;
+}
+
 /* ============ Full-bleed landing ============ */
 .lf-landing-full {
   position: relative;
@@ -144,8 +168,17 @@ img { display: block; }
   z-index: 0;
   pointer-events: none;
   background: radial-gradient(ellipse at center, #0e1c3a 0%, #050810 70%);
+  transition: opacity 200ms ease, filter 200ms ease, transform 200ms ease;
+  will-change: opacity, filter, transform;
 }
-.lf-globe { position: absolute; inset: 0; z-index: 1; }
+.lf-globe {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  transform-origin: center center;
+  transition: opacity 200ms ease, filter 200ms ease, transform 200ms ease;
+  will-change: opacity, filter, transform;
+}
 
 /* ============ Beacon (HTML element on globe) ============ */
 .lf-beacon {

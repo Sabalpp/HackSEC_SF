@@ -17,6 +17,7 @@ function LandingPage({ routeTransition, onBeginRouteTransition }) {
   const [presetId, setPresetId] = useState("arctic");
   const [custom, setCustom] = useState(null); // { lat, lng } | null
   const [activeKind, setActiveKind] = useState("preset"); // "preset" | "custom"
+  const [showSimulate, setShowSimulate] = useState(false);
 
   useEffect(() => {
     preloadDefaultTankScene();
@@ -52,51 +53,62 @@ function LandingPage({ routeTransition, onBeginRouteTransition }) {
     return t ? { lat: t.lat, lng: t.lng } : null;
   }, [activeKind, custom, presetId]);
 
+  const selectedAccent =
+    activeKind === "custom"
+      ? CUSTOM_ACCENT
+      : theaterList.find((t) => t.id === presetId)?.accent ?? CUSTOM_ACCENT;
+
   function selectedMission() {
     if (activeKind === "custom" && custom) {
       return {
+        id: "custom",
         path: `/mission/custom?lat=${custom.lat}&lng=${custom.lng}`,
         target: { lat: custom.lat, lng: custom.lng },
       };
     }
     const theater = theaterList.find((t) => t.id === presetId);
     return {
+      id: presetId,
       path: `/mission/${presetId}`,
       target: theater ? { lat: theater.lat, lng: theater.lng } : focusLatLng,
     };
   }
 
-  function beginSelectedMission() {
-    if (routeTransition) return;
-    const mission = selectedMission();
-    if (!mission.target) return;
-    onBeginRouteTransition(mission);
-  }
-
   function handleSelectMarker(id) {
     if (id === "custom") {
-      if (activeKind === "custom" && custom) {
-        beginSelectedMission();
-        return;
-      }
       setActiveKind("custom");
-      return;
+    } else {
+      setPresetId(id);
+      setActiveKind("preset");
     }
-    if (activeKind === "preset" && presetId === id) {
-      beginSelectedMission();
-      return;
-    }
-    setPresetId(id);
-    setActiveKind("preset");
+    setShowSimulate(true);
   }
 
   function handleGlobeClick(lat, lng) {
     setCustom({ lat, lng });
     setActiveKind("custom");
+    setShowSimulate(true);
   }
 
   function handleChipClick(id) {
-    handleSelectMarker(id);
+    if (id === "custom") {
+      setActiveKind("custom");
+      setShowSimulate(true);
+      return;
+    }
+    setPresetId(id);
+    setActiveKind("preset");
+    setShowSimulate(true);
+  }
+
+  function handleSimulateClick() {
+    if (routeTransition) return;
+    const mission = selectedMission();
+    if (!mission.target) return;
+    onBeginRouteTransition({
+      path: mission.path,
+      target: mission.target,
+    });
   }
 
   return (
@@ -151,6 +163,17 @@ function LandingPage({ routeTransition, onBeginRouteTransition }) {
           )}
         </div>
 
+        {showSimulate && (
+          <button
+            type="button"
+            className="lf-simulate-button"
+            style={{ "--lf-simulate-accent": selectedAccent }}
+            disabled={Boolean(routeTransition)}
+            onClick={handleSimulateClick}
+          >
+            Simulate
+          </button>
+        )}
       </div>
     </div>
   );
@@ -182,8 +205,10 @@ export default function App() {
       setRouteTransition(null);
     }, TRANSITION_NAV_MS);
 
-    return () => window.clearTimeout(navigateTimer);
-  }, [navigate, routeTransition]);
+    return () => {
+      window.clearTimeout(navigateTimer);
+    };
+  }, [navigate, routeTransition?.id, routeTransition?.path]);
 
   return (
     <div className="app-shell">
