@@ -1,9 +1,9 @@
 export const vehicles = {
   ugv: {
     id: "ugv",
-    label: "Unmanned Ground Vehicle",
-    shortLabel: "UGV",
-    summary: "Tracked autonomous ground platform for scout and resupply roles.",
+    label: "Unarmed Autonomous Tank",
+    shortLabel: "Tank",
+    summary: "Tracked autonomous armored platform with a sensor station and no weapon mount.",
     chassis: "tracked",
     massKg: 180,
     payloadKg: 40,

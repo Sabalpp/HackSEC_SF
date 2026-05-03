@@ -70,7 +70,7 @@ const PDF_PAGE_HEIGHT = 792;
 let physicsEngineInitPromise = null;
 
 const VEHICLE_UNIT_OPTIONS = [
-  { id: "ugv", label: "Land Unit" },
+  { id: "ugv", label: "Unarmed Tank" },
   { id: "drone", label: "Air Unit" },
 ];
 

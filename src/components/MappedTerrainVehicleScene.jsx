@@ -11,7 +11,7 @@ const VEHICLE_FACTORIES = {
 };
 
 const DEFAULT_DEPLOYMENT_POINT = Object.freeze({ x: 0, z: 0 });
-const VEHICLE_ALTITUDE = Object.freeze({ ugv: 0.08, drone: 8 });
+const VEHICLE_ALTITUDE = Object.freeze({ ugv: 0.16, drone: 8 });
 const VEHICLE_SPEED = Object.freeze({ ugv: 1.6, drone: 5.5 });
 const DEFAULT_ROUTE_OFFSETS = Object.freeze([
   Object.freeze({ x: -12, z: -8 }),
@@ -398,8 +398,14 @@ export function MappedTerrainVehicleScene({
       controls.target.add(targetDelta);
       camera.position.add(targetDelta);
 
-      if (runActive && asset && typeof asset.update === "function") {
-        asset.update(dt);
+      if (asset && typeof asset.update === "function") {
+        asset.update(dt, {
+          moving: runActive,
+          spinProp: true,
+          spinWheels: runActive,
+          wheelSpinRadiansPerSecond: speed * 4.8,
+          trackTravelMetersPerSecond: speed * 0.34,
+        });
       }
       contactEffect.update(dt);
       controls.update();
