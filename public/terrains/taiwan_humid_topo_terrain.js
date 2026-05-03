@@ -32,6 +32,14 @@ const RADIAL_FOG = Object.freeze({
   edgeFadeStartMeters: 560,
   edgeOpaqueMeters: 760,
 });
+const CAMERA_COLLISION = Object.freeze({
+  nearPlaneMeters: 0.08,
+  minOrbitDistanceMeters: 118,
+  maxPolarAngleDegrees: 78,
+  groundClearanceMeters: 42,
+  targetGroundClearanceMeters: 12,
+  targetEdgePaddingMeters: 18,
+});
 
 const MATERIALS = {
   wetRock: new THREE.MeshStandardMaterial({
@@ -113,7 +121,7 @@ export function createTaiwanHumidTopoScene(container = document.body, options = 
   scene.background = new THREE.Color(FOG_COLOR);
   scene.fog = new THREE.Fog(FOG_COLOR, 540, 1180);
 
-  const camera = new THREE.PerspectiveCamera(54, 1, 1, 2400);
+  const camera = new THREE.PerspectiveCamera(54, 1, CAMERA_COLLISION.nearPlaneMeters, 2400);
   camera.position.set(420, 330, 610);
 
   const renderer = new THREE.WebGLRenderer({
@@ -131,8 +139,8 @@ export function createTaiwanHumidTopoScene(container = document.body, options = 
   controls.target.set(0, 72, 0);
   controls.enableDamping = true;
   controls.maxDistance = 1050;
-  controls.minDistance = 25;
-  controls.maxPolarAngle = THREE.MathUtils.degToRad(87);
+  controls.minDistance = CAMERA_COLLISION.minOrbitDistanceMeters;
+  controls.maxPolarAngle = THREE.MathUtils.degToRad(CAMERA_COLLISION.maxPolarAngleDegrees);
   controls.update();
 
   addLighting(scene);
@@ -160,11 +168,11 @@ export function createTaiwanHumidTopoScene(container = document.body, options = 
   resizeObserver.observe(target);
   window.addEventListener("resize", resize);
 
-  controls.update();
+  updateTerrainCamera(camera, controls);
   renderer.render(scene, camera);
 
   renderer.setAnimationLoop(() => {
-    controls.update();
+    updateTerrainCamera(camera, controls);
     renderer.render(scene, camera);
   });
 
@@ -182,6 +190,60 @@ export function createTaiwanHumidTopoScene(container = document.body, options = 
       renderer.domElement.remove();
     },
   };
+}
+
+function updateTerrainCamera(camera, controls) {
+  controls.update();
+
+  if (constrainCameraToTerrain(camera, controls)) {
+    controls.update();
+  }
+}
+
+function constrainCameraToTerrain(camera, controls) {
+  let changed = false;
+  const targetLimit = HALF_TERRAIN - CAMERA_COLLISION.targetEdgePaddingMeters;
+
+  const targetX = THREE.MathUtils.clamp(controls.target.x, -targetLimit, targetLimit);
+  const targetZ = THREE.MathUtils.clamp(controls.target.z, -targetLimit, targetLimit);
+
+  if (targetX !== controls.target.x || targetZ !== controls.target.z) {
+    controls.target.x = targetX;
+    controls.target.z = targetZ;
+    changed = true;
+  }
+
+  const targetGround = renderHeightMetersAt(controls.target.x, controls.target.z);
+  const minimumTargetY = targetGround + CAMERA_COLLISION.targetGroundClearanceMeters;
+
+  if (controls.target.y < minimumTargetY) {
+    controls.target.y = minimumTargetY;
+    changed = true;
+  }
+
+  const cameraGround = renderHeightMetersAt(camera.position.x, camera.position.z);
+  const minimumCameraY = cameraGround + CAMERA_COLLISION.groundClearanceMeters;
+
+  if (camera.position.y < minimumCameraY) {
+    camera.position.y = minimumCameraY;
+    changed = true;
+  }
+
+  const offset = camera.position.clone().sub(controls.target);
+  const distance = offset.length();
+
+  if (distance < CAMERA_COLLISION.minOrbitDistanceMeters) {
+    if (distance < 0.001) {
+      offset.set(0, CAMERA_COLLISION.minOrbitDistanceMeters, 0);
+    } else {
+      offset.setLength(CAMERA_COLLISION.minOrbitDistanceMeters);
+    }
+
+    camera.position.copy(controls.target).add(offset);
+    changed = true;
+  }
+
+  return changed;
 }
 
 export function terrainElevationMetersAt(xMetersEast, zMetersNorth) {
