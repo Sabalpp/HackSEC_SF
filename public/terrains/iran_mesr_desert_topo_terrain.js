@@ -10,7 +10,7 @@ export const IRAN_MESR_DESERT_TOPO_CONFIG = Object.freeze({
   location: "Mesr Desert dune field, Dasht-e Kavir, Isfahan Province, Iran",
   centerElevationMetersAsl: 720,
   terrainSizeMeters: 1000,
-  verticalExaggeration: 1,
+  verticalExaggeration: 0.75,
   contourIntervalMeters: 25,
   note:
     "Procedural public terrain model inspired by the Mesr Desert dune field in Dasht-e Kavir. It is not a surveyed DEM tile.",

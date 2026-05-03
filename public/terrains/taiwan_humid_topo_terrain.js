@@ -1,27 +1,27 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-export const THOMPSON_PASS_SNOW_TOPO_CONFIG = Object.freeze({
-  name: "Thompson Pass Snow Topographic Terrain",
+export const TAIWAN_HUMID_TOPO_CONFIG = Object.freeze({
+  name: "Taiwan Humid Topographic Terrain",
   center: {
-    latitude: 61.13130296,
-    longitude: -145.7367325,
+    latitude: 24.8652,
+    longitude: 121.5518,
   },
-  location: "Thompson Pass, Chugach Mountains, Near Valdez, Alaska",
-  centerElevationMetersAsl: 855,
+  location: "Wulai, New Taipei, Taiwan",
+  centerElevationMetersAsl: 430,
   terrainSizeMeters: 1000,
   verticalExaggeration: 1,
   contourIntervalMeters: 25,
   note:
-    "Procedural public terrain model inspired by Thompson Pass alpine topography. It is not a surveyed DEM tile.",
+    "Procedural public terrain model inspired by humid mountain valleys in northern Taiwan. It is not a surveyed DEM tile.",
 });
 
-const CONFIG = THOMPSON_PASS_SNOW_TOPO_CONFIG;
+const CONFIG = TAIWAN_HUMID_TOPO_CONFIG;
 const TERRAIN_SIZE = CONFIG.terrainSizeMeters;
 const HALF_TERRAIN = TERRAIN_SIZE / 2;
 const GRID_SEGMENTS = 220;
 const VERTICAL_EXAGGERATION = CONFIG.verticalExaggeration;
-const SEED = 61131302;
+const SEED = 248652;
 const FOG_COLOR = 0xdce4e7;
 const RADIAL_FOG = Object.freeze({
   innerRadiusMeters: 500,
@@ -33,51 +33,56 @@ const RADIAL_FOG = Object.freeze({
 });
 
 const MATERIALS = {
-  rock: new THREE.MeshStandardMaterial({
-    color: 0x5d6060,
-    roughness: 0.92,
+  wetRock: new THREE.MeshStandardMaterial({
+    color: 0x59635c,
+    roughness: 0.98,
     metalness: 0.02,
   }),
-  pineTrunk: new THREE.MeshStandardMaterial({
-    color: 0x493d31,
-    roughness: 0.94,
-    metalness: 0,
-  }),
-  pineNeedles: new THREE.MeshStandardMaterial({
-    color: 0x253d2f,
+  treeTrunk: new THREE.MeshStandardMaterial({
+    color: 0x493829,
     roughness: 0.96,
     metalness: 0,
   }),
-  pineSnow: new THREE.MeshStandardMaterial({
-    color: 0xfbfffd,
-    roughness: 0.88,
+  canopyDeep: new THREE.MeshStandardMaterial({
+    color: 0x254932,
+    roughness: 0.98,
+    metalness: 0,
+  }),
+  canopyLight: new THREE.MeshStandardMaterial({
+    color: 0x4f6e3f,
+    roughness: 0.98,
     metalness: 0,
   }),
   contourMinor: new THREE.LineBasicMaterial({
-    color: 0x667377,
+    color: 0x416054,
     transparent: true,
-    opacity: 0.46,
+    opacity: 0.45,
     fog: true,
   }),
   contourMajor: new THREE.LineBasicMaterial({
-    color: 0x34444a,
+    color: 0x1f3f38,
     transparent: true,
     opacity: 0.72,
     fog: true,
   }),
-  snowRoad: new THREE.MeshStandardMaterial({
-    color: 0xcbd5d8,
-    roughness: 0.96,
-    metalness: 0,
-  }),
-  slopeShadow: new THREE.MeshStandardMaterial({
-    color: 0xb7c2c6,
+  wetTrail: new THREE.MeshStandardMaterial({
+    color: 0x6d6a55,
     roughness: 0.98,
     metalness: 0,
+    transparent: true,
+    opacity: 0.62,
+  }),
+  landslideScar: new THREE.MeshStandardMaterial({
+    color: 0x8b7b5f,
+    roughness: 0.98,
+    metalness: 0,
+    transparent: true,
+    opacity: 0.68,
+    depthWrite: false,
   }),
 };
 
-export function createThompsonPassSnowTopoScene(container = document.body, options = {}) {
+export function createTaiwanHumidTopoScene(container = document.body, options = {}) {
   const target = typeof container === "string" ? document.querySelector(container) : container;
 
   if (!target) {
@@ -90,7 +95,7 @@ export function createThompsonPassSnowTopoScene(container = document.body, optio
   scene.fog = new THREE.Fog(FOG_COLOR, 540, 1180);
 
   const camera = new THREE.PerspectiveCamera(54, 1, 1, 2400);
-  camera.position.set(420, 310, 610);
+  camera.position.set(420, 330, 610);
 
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
@@ -104,7 +109,7 @@ export function createThompsonPassSnowTopoScene(container = document.body, optio
   target.appendChild(renderer.domElement);
 
   const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 35, 0);
+  controls.target.set(0, 72, 0);
   controls.enableDamping = true;
   controls.maxDistance = 1050;
   controls.minDistance = 25;
@@ -116,10 +121,12 @@ export function createThompsonPassSnowTopoScene(container = document.body, optio
   const terrainData = buildTerrainData();
   addTerrain(scene, terrainData);
   addContourLines(scene, terrainData);
-  addSnowCoveredPassTrace(scene);
-  addWindPackedSnowfields(scene);
-  addRockOutcrops(scene);
-  addSnowToppedPineTrees(scene);
+  addWetFootpath(scene);
+  addLandslideScars(scene);
+  addWetRockOutcrops(scene, terrainData);
+  addRainforestTrees(scene);
+  addFogBoundaryPlane(scene);
+  addScaleReference(scene);
   applyRadialFogToScene(scene);
 
   const resize = () => {
@@ -159,44 +166,53 @@ export function createThompsonPassSnowTopoScene(container = document.body, optio
 }
 
 export function terrainElevationMetersAt(xMetersEast, zMetersNorth) {
-  const valleyAxis = valleyAxisAt(zMetersNorth);
+  const valleyAxis = riverAxisAt(zMetersNorth);
   const across = xMetersEast - valleyAxis;
   const along = zMetersNorth;
   const normalizedAcross = Math.abs(across) / HALF_TERRAIN;
   const normalizedAlong = along / HALF_TERRAIN;
 
-  const saddle = -34 * Math.exp(-Math.pow(along / 245, 2));
-  const westWall = 152 * smoothRamp(Math.max(0, (-across - 75) / 430), 1.55);
-  const eastWall = 196 * smoothRamp(Math.max(0, (across - 55) / 445), 1.72);
-  const northRise = 46 * smoothRamp(Math.max(0, normalizedAlong), 1.28);
-  const southRoll = 28 * smoothRamp(Math.max(0, -normalizedAlong), 1.18);
-  const glacialBench = -24 * Math.exp(-Math.pow((across + 145) / 105, 2)) * Math.exp(-Math.pow((along - 120) / 420, 2));
-  const windLip = 21 * Math.exp(-Math.pow((across - 215) / 58, 2)) * Math.exp(-Math.pow((along + 160) / 330, 2));
+  const riverCut = -74 * Math.exp(-Math.pow(across / 54, 2)) * (0.92 + 0.08 * Math.sin(along * 0.017));
+  const westWall = 226 * smoothRamp(Math.max(0, (-across - 46) / 430), 1.58);
+  const eastWall = 276 * smoothRamp(Math.max(0, (across - 42) / 445), 1.68);
+  const northRise = 62 * smoothRamp(Math.max(0, normalizedAlong + 0.1), 1.22);
+  const southShoulder = 42 * smoothRamp(Math.max(0, -normalizedAlong - 0.04), 1.12);
+  const convexSpurs =
+    31 * Math.exp(-Math.pow((across + 225) / 92, 2)) * Math.exp(-Math.pow((along + 130) / 355, 2)) +
+    36 * Math.exp(-Math.pow((across - 235) / 88, 2)) * Math.exp(-Math.pow((along - 95) / 385, 2));
+  const riverTerraces =
+    -15 *
+      Math.exp(-Math.pow((Math.abs(across) - 88) / 34, 2)) *
+      Math.exp(-Math.pow((along + 105) / 380, 2)) +
+    -10 *
+      Math.exp(-Math.pow((Math.abs(across) - 138) / 42, 2)) *
+      Math.exp(-Math.pow((along - 190) / 360, 2));
 
-  const gullies =
-    -18 * gully(across + 245 + 18 * Math.sin(along * 0.018), along, -160, 250) +
-    -14 * gully(across - 285 + 16 * Math.cos(along * 0.016), along, 110, 300) +
-    -10 * gully(across + 30, along, 220, 360);
+  const tributaryGullies =
+    -29 * gully(across + 192 + 20 * Math.sin(along * 0.019), along, -250, 270) +
+    -24 * gully(across - 230 + 22 * Math.cos(along * 0.016), along, -40, 315) +
+    -18 * gully(across + 318 - 16 * Math.sin(along * 0.014), along, 210, 250) +
+    -15 * gully(across - 96, along, 315, 215);
 
   const ridgeRoughness =
-    9.5 * fbm(xMetersEast * 0.011, zMetersNorth * 0.011, 5) * Math.min(1, normalizedAcross * 1.35) +
-    4.2 * fbm(xMetersEast * 0.027 + 17, zMetersNorth * 0.027 - 9, 4);
+    17.5 * fbm(xMetersEast * 0.012 + 8, zMetersNorth * 0.012 - 3, 5) * Math.min(1, normalizedAcross * 1.48) +
+    8.6 * fbm(xMetersEast * 0.029 - 19, zMetersNorth * 0.029 + 11, 4);
 
-  const passFloorUndulation =
-    5.5 * Math.sin((along + 120) * 0.013) * Math.exp(-Math.pow(across / 250, 2)) +
-    3.8 * Math.cos((xMetersEast - zMetersNorth) * 0.009);
+  const wetUndulation =
+    4.8 * Math.sin((along + 90) * 0.014) * Math.exp(-Math.pow(across / 250, 2)) +
+    3.6 * Math.cos((xMetersEast - zMetersNorth) * 0.01);
 
   return (
-    saddle +
+    riverCut +
     westWall +
     eastWall +
     northRise +
-    southRoll +
-    glacialBench +
-    windLip +
-    gullies +
+    southShoulder +
+    convexSpurs +
+    riverTerraces +
+    tributaryGullies +
     ridgeRoughness +
-    passFloorUndulation -
+    wetUndulation +
     18
   );
 }
@@ -216,16 +232,20 @@ export function metersToLatLon(xMetersEast, zMetersNorth) {
   };
 }
 
-function valleyAxisAt(zMetersNorth) {
-  return 34 * Math.sin(zMetersNorth * 0.0075) - 18 * Math.sin(zMetersNorth * 0.017);
+function riverAxisAt(zMetersNorth) {
+  return (
+    50 * Math.sin(zMetersNorth * 0.0064 + 0.35) +
+    24 * Math.sin(zMetersNorth * 0.015 + 0.9) -
+    15 * Math.cos(zMetersNorth * 0.0035)
+  );
 }
 
 function addLighting(scene) {
-  const hemisphere = new THREE.HemisphereLight(0xf4f8fb, 0x75818a, 1.65);
+  const hemisphere = new THREE.HemisphereLight(0xf4fff7, 0x3d4f45, 1.75);
   scene.add(hemisphere);
 
-  const sun = new THREE.DirectionalLight(0xfff5dc, 2.65);
-  sun.position.set(-460, 740, 280);
+  const sun = new THREE.DirectionalLight(0xfff2cf, 2.35);
+  sun.position.set(-420, 690, 330);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -760;
@@ -260,7 +280,7 @@ function buildTerrainData() {
       const elevation = terrainElevationMetersAt(x, z);
       const y = elevation * VERTICAL_EXAGGERATION;
       const slope = terrainSlopeAt(x, z);
-      const color = snowColorAt(x, z, elevation, slope);
+      const color = humidTerrainColorAt(x, z, elevation, slope);
 
       positions[positionIndex++] = x;
       positions[positionIndex++] = y;
@@ -310,12 +330,12 @@ function addTerrain(scene, terrainData) {
 
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
-    roughness: 0.98,
+    roughness: 0.99,
     metalness: 0,
   });
 
   const terrain = new THREE.Mesh(geometry, material);
-  terrain.name = "1 km square snow-blanketed topographic terrain";
+  terrain.name = "1 km square humid Taiwan topographic terrain";
   terrain.receiveShadow = true;
   scene.add(terrain);
 }
@@ -419,48 +439,50 @@ function createLineSegments(positions, material, name) {
   return lines;
 }
 
-function addSnowCoveredPassTrace(scene) {
+function addWetFootpath(scene) {
   const points = [];
 
-  for (let i = 0; i <= 30; i += 1) {
-    const z = THREE.MathUtils.lerp(-520, 520, i / 30);
-    const x = 22 * Math.sin(z * 0.009) - 16 * Math.sin(z * 0.018);
+  for (let i = 0; i <= 34; i += 1) {
+    const z = THREE.MathUtils.lerp(-500, 500, i / 34);
+    const x = riverAxisAt(z) + 116 + 18 * Math.sin(z * 0.012);
     points.push(new THREE.Vector2(x, z));
   }
 
-  const trace = new THREE.Mesh(createRibbonGeometry(points, 32, 0.62), MATERIALS.snowRoad);
-  trace.name = "subtle snow-covered pass trace";
-  trace.receiveShadow = true;
-  scene.add(trace);
+  const path = new THREE.Mesh(createRibbonGeometry(points, 15, 0.74), MATERIALS.wetTrail);
+  path.name = "narrow wet hillside footpath";
+  path.receiveShadow = true;
+  scene.add(path);
 }
 
-function addWindPackedSnowfields(scene) {
-  const snowfields = [
-    { x: -190, z: -155, width: 210, depth: 72, rotation: -0.42, opacity: 0.58 },
-    { x: 245, z: 170, width: 260, depth: 78, rotation: 0.32, opacity: 0.5 },
-    { x: -55, z: 280, width: 180, depth: 56, rotation: -0.1, opacity: 0.44 },
-    { x: 160, z: -330, width: 160, depth: 50, rotation: 0.16, opacity: 0.42 },
+function addLandslideScars(scene) {
+  const scars = [
+    { x: -275, z: -205, width: 120, depth: 46, rotation: -0.68, opacity: 0.64 },
+    { x: 302, z: -62, width: 158, depth: 54, rotation: 0.55, opacity: 0.7 },
+    { x: -330, z: 138, width: 134, depth: 44, rotation: -0.5, opacity: 0.58 },
+    { x: 238, z: 275, width: 108, depth: 42, rotation: 0.35, opacity: 0.6 },
   ];
 
-  for (const field of snowfields) {
-    const mesh = createSnowfield(field);
+  for (const scar of scars) {
+    const material = MATERIALS.landslideScar.clone();
+    material.opacity = scar.opacity;
+    const mesh = createTerrainPatch(scar, material, "wet exposed landslide scar");
     scene.add(mesh);
   }
 }
 
-function createSnowfield(field) {
+function createTerrainPatch(patch, material, name) {
   const xSegments = 14;
   const zSegments = 5;
   const positions = [];
   const indices = [];
 
   for (let zIndex = 0; zIndex <= zSegments; zIndex += 1) {
-    const localZ = THREE.MathUtils.lerp(-field.depth / 2, field.depth / 2, zIndex / zSegments);
+    const localZ = THREE.MathUtils.lerp(-patch.depth / 2, patch.depth / 2, zIndex / zSegments);
 
     for (let xIndex = 0; xIndex <= xSegments; xIndex += 1) {
-      const localX = THREE.MathUtils.lerp(-field.width / 2, field.width / 2, xIndex / xSegments);
-      const world = rotateAndTranslate(localX, localZ, field.x, field.z, field.rotation);
-      positions.push(world.x, renderHeightMetersAt(world.x, world.z) + 0.85, world.z);
+      const localX = THREE.MathUtils.lerp(-patch.width / 2, patch.width / 2, xIndex / xSegments);
+      const world = rotateAndTranslate(localX, localZ, patch.x, patch.z, patch.rotation);
+      positions.push(world.x, renderHeightMetersAt(world.x, world.z) + 0.9, world.z);
     }
   }
 
@@ -480,288 +502,255 @@ function createSnowfield(field) {
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
 
-  const material = new THREE.MeshStandardMaterial({
-    color: 0xf4f7f5,
-    roughness: 0.92,
-    metalness: 0,
-    transparent: true,
-    opacity: field.opacity,
-    depthWrite: false,
-  });
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = "wind-packed snowfield overlay";
+  mesh.name = name;
   mesh.receiveShadow = true;
   return mesh;
 }
 
-function addRockOutcrops(scene) {
-  const random = mulberry32(SEED + 910);
+function addWetRockOutcrops(scene, terrainData) {
+  const random = mulberry32(SEED + 911);
   const geometry = new THREE.DodecahedronGeometry(1, 0);
   const matrices = [];
   const dummy = new THREE.Object3D();
-  const targetCount = 118;
+  const targetCount = 79;
+  const elevationSpan = Math.max(terrainData.maxElevation - terrainData.minElevation, 1);
   let attempts = 0;
 
-  while (matrices.length < targetCount && attempts < targetCount * 18) {
+  while (matrices.length < targetCount && attempts < targetCount * 34) {
     attempts += 1;
 
-    const valleyBiased = random() < 0.58;
-    const z = randomRange(random, -HALF_TERRAIN + 22, HALF_TERRAIN - 22);
+    const z = randomRange(random, -HALF_TERRAIN + 20, HALF_TERRAIN - 20);
+    const valleyCenter = riverAxisAt(z);
+    const valleyBiased = random() < 0.82;
+    const valleyBand = random() < 0.74 ? randomRange(random, -155, 155) : randomRange(random, -270, 270);
     const x = valleyBiased
-      ? valleyAxisAt(z) + randomRange(random, -190, 190)
-      : randomRange(random, -HALF_TERRAIN + 22, HALF_TERRAIN - 22);
+      ? valleyCenter + valleyBand
+      : randomRange(random, -HALF_TERRAIN + 24, HALF_TERRAIN - 24);
     const slope = terrainSlopeAt(x, z);
+    const across = Math.abs(x - valleyCenter);
     const elevation = terrainElevationMetersAt(x, z);
-    const across = Math.abs(x - valleyAxisAt(z));
-    const valleyProximity = Math.exp(-Math.pow(across / 165, 2));
-    const relativeHeight = THREE.MathUtils.clamp((elevation + 45) / 235, 0, 1);
+    const height01 = THREE.MathUtils.clamp((elevation - terrainData.minElevation) / elevationSpan, 0, 1);
+    const bottomAffinity = Math.pow(1 - height01, 1.85);
+    const valleyProximity = Math.exp(-Math.pow(across / 185, 2));
+    const density =
+      0.04 +
+      bottomAffinity * 0.74 +
+      valleyProximity * bottomAffinity * 0.26 -
+      Math.max(0, slope - 0.52) * 0.08;
 
-    if (!valleyBiased && slope < 0.22 && random() < 0.75) {
-      continue;
-    }
+    if (random() > THREE.MathUtils.clamp(density, 0.03, 0.94)) continue;
+    if (!valleyBiased && bottomAffinity < 0.38 && random() < 0.82) continue;
 
-    if (across < 34 && random() < 0.58) {
-      continue;
-    }
+    const baseScale = randomRange(random, 0.42, 1.35) * (0.44 + bottomAffinity * 0.78);
+    const valleyBoulderScale =
+      Math.pow(bottomAffinity, 2.18) * valleyProximity * randomRange(random, 2.6, 7.8);
+    const slopeChipScale = randomRange(random, 0.22, 1.0) * (1 - bottomAffinity) * THREE.MathUtils.clamp(slope, 0.25, 0.9);
+    const scale = Math.max(0.28, baseScale + valleyBoulderScale + slopeChipScale);
+    const longAxis = randomRange(random, 0.78, 2.15) * (1 + valleyProximity * bottomAffinity * 0.54);
+    const heightAxis = randomRange(random, 0.18, 0.58) * (0.62 + bottomAffinity * 0.45);
+    const depthAxis = randomRange(random, 0.58, 1.58) * (1 + slope * 0.26);
 
-    const y = renderHeightMetersAt(x, z);
-    const valleyBoulderScale = randomRange(random, 3.2, 7.4) * valleyProximity * (1 - relativeHeight * 0.48);
-    const highOutcropScale = randomRange(random, 0.45, 2.35) * (0.72 + slope * 1.1);
-    const scale = Math.max(0.7, valleyBoulderScale + highOutcropScale * (0.42 + relativeHeight * 0.72));
-    const longAxis = randomRange(random, 0.75, 1.85) * (1 + valleyProximity * 0.42);
-    const heightAxis = randomRange(random, 0.18, 0.52) * (1 - valleyProximity * 0.16);
-    const depthAxis = randomRange(random, 0.58, 1.5) * (1 + slope * 0.45);
-
-    dummy.position.set(x, y + scale * 0.2, z);
+    dummy.position.set(x, renderHeightMetersAt(x, z) + scale * 0.18, z);
     dummy.rotation.set(random() * Math.PI, random() * Math.PI, random() * Math.PI);
     dummy.scale.set(scale * longAxis, scale * heightAxis, scale * depthAxis);
     dummy.updateMatrix();
     matrices.push(dummy.matrix.clone());
   }
 
-  const rocks = new THREE.InstancedMesh(geometry, MATERIALS.rock, matrices.length);
-  rocks.name = "wind-scoured rock outcrops";
+  const rocks = new THREE.InstancedMesh(geometry, MATERIALS.wetRock, matrices.length);
+  rocks.name = "valley-floor boulders fading into small high-slope rock";
   rocks.castShadow = true;
   rocks.receiveShadow = true;
   matrices.forEach((matrix, index) => rocks.setMatrixAt(index, matrix));
   scene.add(rocks);
 }
 
-function addSnowToppedPineTrees(scene) {
-  const random = mulberry32(SEED + 1204);
-  const trunkGeometry = new THREE.CylinderGeometry(1, 1, 1, 6);
-  const crownGeometry = new THREE.ConeGeometry(1, 1, 8);
+function addRainforestTrees(scene) {
+  const random = mulberry32(SEED + 1304);
+  const trunkGeometry = new THREE.CylinderGeometry(0.72, 1, 1, 7);
+  const roundedCanopyGeometry = new THREE.IcosahedronGeometry(1, 1);
+  const coarseCanopyGeometry = new THREE.DodecahedronGeometry(1, 0);
   const trunkMatrices = [];
-  const lowerNeedleMatrices = [];
-  const middleNeedleMatrices = [];
-  const upperNeedleMatrices = [];
-  const lowerSnowMatrices = [];
-  const middleSnowMatrices = [];
-  const upperSnowMatrices = [];
+  const roundedCanopyMatrices = [];
+  const coarseCanopyMatrices = [];
+  const lightCanopyMatrices = [];
   const dummy = new THREE.Object3D();
-  const clusters = [
-    { z: -410, lateral: -76, radiusX: 38, radiusZ: 58, count: 15 },
-    { z: -350, lateral: 68, radiusX: 46, radiusZ: 66, count: 19 },
-    { z: -275, lateral: -112, radiusX: 34, radiusZ: 50, count: 13 },
-    { z: -210, lateral: 88, radiusX: 52, radiusZ: 70, count: 22 },
-    { z: -118, lateral: -70, radiusX: 44, radiusZ: 64, count: 18 },
-    { z: -36, lateral: 78, radiusX: 52, radiusZ: 76, count: 24 },
-    { z: 60, lateral: -92, radiusX: 42, radiusZ: 62, count: 17 },
-    { z: 144, lateral: 72, radiusX: 44, radiusZ: 60, count: 18 },
-    { z: 238, lateral: -68, radiusX: 36, radiusZ: 56, count: 13 },
-    { z: 330, lateral: 82, radiusX: 42, radiusZ: 58, count: 15 },
+  const patchTreeMultiplier = 2;
+  const targetCount = 880 * patchTreeMultiplier;
+  const minTreeSpacing = 11.5;
+  const plantedPositions = [];
+  const patchSpecs = [
+    { z: -425, lateral: -190, radiusX: 68, radiusZ: 82, count: 58 },
+    { z: -410, lateral: 160, radiusX: 62, radiusZ: 76, count: 54 },
+    { z: -315, lateral: -250, radiusX: 76, radiusZ: 84, count: 64 },
+    { z: -270, lateral: 135, radiusX: 70, radiusZ: 86, count: 62 },
+    { z: -185, lateral: -95, radiusX: 78, radiusZ: 92, count: 70 },
+    { z: -120, lateral: 245, radiusX: 66, radiusZ: 78, count: 56 },
+    { z: -40, lateral: -245, radiusX: 72, radiusZ: 84, count: 62 },
+    { z: 30, lateral: 150, radiusX: 82, radiusZ: 96, count: 72 },
+    { z: 105, lateral: -135, radiusX: 84, radiusZ: 96, count: 74 },
+    { z: 180, lateral: 270, radiusX: 68, radiusZ: 82, count: 58 },
+    { z: 235, lateral: -250, radiusX: 68, radiusZ: 82, count: 58 },
+    { z: 305, lateral: 92, radiusX: 78, radiusZ: 90, count: 66 },
+    { z: 380, lateral: -120, radiusX: 66, radiusZ: 80, count: 56 },
+    { z: 420, lateral: 245, radiusX: 78, radiusZ: 92, count: 70 },
   ];
+  let planted = 0;
 
-  for (const cluster of clusters) {
-    let planted = 0;
+  for (const patch of patchSpecs) {
+    const centerZ = patch.z;
+    const centerX = riverAxisAt(centerZ) + patch.lateral;
+    let plantedInPatch = 0;
     let attempts = 0;
 
-    while (planted < cluster.count && attempts < cluster.count * 22) {
+    const patchTargetCount = patch.count * patchTreeMultiplier;
+
+    while (planted < targetCount && plantedInPatch < patchTargetCount && attempts < patchTargetCount * 46) {
       attempts += 1;
 
       const radius = Math.sqrt(random());
       const angle = randomRange(random, 0, Math.PI * 2);
-      const z = cluster.z + Math.sin(angle) * cluster.radiusZ * radius + randomRange(random, -8, 8);
-      const x =
-        valleyAxisAt(z) +
-        cluster.lateral +
-        Math.cos(angle) * cluster.radiusX * radius +
-        randomRange(random, -7, 7);
+      const z = centerZ + Math.sin(angle) * patch.radiusZ * radius + randomRange(random, -10, 10);
+      const x = centerX + Math.cos(angle) * patch.radiusX * radius + randomRange(random, -10, 10);
 
       if (Math.abs(x) > HALF_TERRAIN - 28 || Math.abs(z) > HALF_TERRAIN - 28) continue;
 
       const elevation = terrainElevationMetersAt(x, z);
       const slope = terrainSlopeAt(x, z);
-      const across = Math.abs(x - valleyAxisAt(z));
-      const shelterNoise = fbm(x * 0.014 + 31, z * 0.014 - 18, 4);
+      const across = Math.abs(x - riverAxisAt(z));
+      const canopyNoise = fbm(x * 0.019 + 4, z * 0.019 - 6, 4);
+      const elevationFade = 1 - THREE.MathUtils.clamp((elevation - 70) / 340, 0, 0.58);
+      const density = 0.48 + canopyNoise * 0.34 + elevationFade * 0.18;
 
-      if (across < 34 || across > 168) continue;
-      if (elevation > 52) continue;
-      if (slope > 0.36) continue;
-      if (shelterNoise < 0.2 && random() < 0.72) continue;
+      if (across < 42) continue;
+      if (slope > 0.74) continue;
+      if (elevation > 360 && random() < 0.58) continue;
+      if (random() > density) continue;
+      if (isNearExistingTree(x, z, plantedPositions, minTreeSpacing)) continue;
 
-      plantSnowToppedPine(
+      plantBroadleafTree(
         dummy,
         random,
         x,
         z,
         elevation,
         trunkMatrices,
-        lowerNeedleMatrices,
-        middleNeedleMatrices,
-        upperNeedleMatrices,
-        lowerSnowMatrices,
-        middleSnowMatrices,
-        upperSnowMatrices,
+        roundedCanopyMatrices,
+        coarseCanopyMatrices,
+        lightCanopyMatrices,
       );
+      plantedPositions.push({ x, z });
+      plantedInPatch += 1;
       planted += 1;
     }
   }
 
-  const trunks = new THREE.InstancedMesh(trunkGeometry, MATERIALS.pineTrunk, trunkMatrices.length);
-  trunks.name = "snow-topped pine trunks";
+  const trunks = new THREE.InstancedMesh(trunkGeometry, MATERIALS.treeTrunk, trunkMatrices.length);
+  trunks.name = "humid forest trunks";
   trunks.castShadow = true;
   trunks.receiveShadow = true;
   trunkMatrices.forEach((matrix, index) => trunks.setMatrixAt(index, matrix));
   scene.add(trunks);
 
-  addTreeInstancedMesh(scene, crownGeometry, MATERIALS.pineNeedles, lowerNeedleMatrices, "lower green pine needles");
-  addTreeInstancedMesh(scene, crownGeometry, MATERIALS.pineNeedles, middleNeedleMatrices, "middle green pine needles");
-  addTreeInstancedMesh(scene, crownGeometry, MATERIALS.pineNeedles, upperNeedleMatrices, "upper green pine needles");
-  addTreeInstancedMesh(scene, crownGeometry, MATERIALS.pineSnow, lowerSnowMatrices, "lower snow caps on pine branches");
-  addTreeInstancedMesh(scene, crownGeometry, MATERIALS.pineSnow, middleSnowMatrices, "middle snow caps on pine branches");
-  addTreeInstancedMesh(scene, crownGeometry, MATERIALS.pineSnow, upperSnowMatrices, "upper snow caps on pine branches");
+  addTreeInstancedMesh(scene, roundedCanopyGeometry, MATERIALS.canopyDeep, roundedCanopyMatrices, "rounded broadleaf canopy lobes");
+  addTreeInstancedMesh(scene, coarseCanopyGeometry, MATERIALS.canopyDeep, coarseCanopyMatrices, "irregular broadleaf canopy lobes");
+  addTreeInstancedMesh(scene, roundedCanopyGeometry, MATERIALS.canopyLight, lightCanopyMatrices, "lighter wet canopy highlights");
 }
 
-function plantSnowToppedPine(
+function isNearExistingTree(x, z, positions, minDistance) {
+  const minDistanceSquared = minDistance * minDistance;
+
+  for (const position of positions) {
+    const dx = x - position.x;
+    const dz = z - position.z;
+    if (dx * dx + dz * dz < minDistanceSquared) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function plantBroadleafTree(
   dummy,
   random,
   x,
   z,
   elevation,
   trunkMatrices,
-  lowerNeedleMatrices,
-  middleNeedleMatrices,
-  upperNeedleMatrices,
-  lowerSnowMatrices,
-  middleSnowMatrices,
-  upperSnowMatrices,
+  roundedCanopyMatrices,
+  coarseCanopyMatrices,
+  lightCanopyMatrices,
 ) {
   const ground = renderHeightMetersAt(x, z);
-  const heightPenalty = THREE.MathUtils.clamp((elevation - 12) / 95, 0, 0.36);
-  const heightT = Math.pow(random(), 0.72);
-  const totalHeight = THREE.MathUtils.lerp(5.4, 18.8, heightT) * (1 - heightPenalty);
-  const crownSpread = randomRange(random, 0.78, 1.34) * (1 - heightPenalty * 0.18);
-  const crownOvalX = randomRange(random, 0.78, 1.28);
-  const crownOvalZ = randomRange(random, 0.76, 1.24);
-  const layerJitter = totalHeight * randomRange(random, 0.008, 0.03);
-  const trunkHeight = totalHeight * randomRange(random, 0.18, 0.34);
-  const trunkRadius = THREE.MathUtils.clamp(totalHeight * randomRange(random, 0.032, 0.052), 0.24, 0.82);
-  const trunkOval = randomRange(random, 0.82, 1.18);
+  const heightPenalty = THREE.MathUtils.clamp((elevation - 170) / 360, 0, 0.32);
+  const totalHeight = randomRange(random, 7.2, 17.4) * (1 - heightPenalty);
+  const trunkHeight = totalHeight * randomRange(random, 0.5, 0.62);
+  const trunkRadius = randomRange(random, 0.24, 0.5);
   const yaw = randomRange(random, 0, Math.PI * 2);
-  const leanDirection = randomRange(random, 0, Math.PI * 2);
-  const leanMagnitude = randomRange(random, 0.01, 0.065) * (1 + heightPenalty * 0.5);
-  const leanX = Math.cos(leanDirection) * leanMagnitude;
-  const leanZ = Math.sin(leanDirection) * leanMagnitude;
+  const leanX = randomRange(random, -0.055, 0.055);
+  const leanZ = randomRange(random, -0.055, 0.055);
 
-  setMatrix(
-    dummy,
-    x,
-    ground + trunkHeight / 2,
-    z,
-    yaw,
-    leanX,
-    leanZ,
-    trunkRadius * trunkOval,
-    trunkHeight,
-    trunkRadius / trunkOval,
-  );
+  setMatrix(dummy, x, ground + trunkHeight / 2, z, yaw, leanX, leanZ, trunkRadius, trunkHeight, trunkRadius);
   trunkMatrices.push(dummy.matrix.clone());
 
-  const lowerRadius = totalHeight * randomRange(random, 0.135, 0.225) * crownSpread;
-  const lowerRadiusX = lowerRadius * crownOvalX * randomRange(random, 0.88, 1.16);
-  const lowerRadiusZ = lowerRadius * crownOvalZ * randomRange(random, 0.86, 1.18);
-  const lowerSnowRadiusFactor = randomRange(random, 0.78, 0.94);
+  const form = random();
+  const lobeCount = form < 0.48 ? 2 : form < 0.9 ? 3 : 4;
+  const spreadFactor = form < 0.48 ? randomRange(random, 0.36, 0.5) : form < 0.9 ? randomRange(random, 0.48, 0.64) : randomRange(random, 0.58, 0.72);
+  const verticalFactor = form < 0.48 ? randomRange(random, 0.9, 1.08) : randomRange(random, 0.66, 0.86);
+  const canopyRadius = totalHeight * randomRange(random, 0.135, 0.19) * 2.5;
+  const canopyBaseY = ground + trunkHeight + canopyRadius * randomRange(random, 0.16, 0.32);
+  const crownYaw = yaw + randomRange(random, -0.55, 0.55);
 
-  const middleRadius = totalHeight * randomRange(random, 0.095, 0.165) * crownSpread;
-  const middleRadiusX = Math.min(
-    middleRadius * crownOvalX * randomRange(random, 0.82, 1.18),
-    lowerRadiusX * randomRange(random, 0.48, 0.68),
-    lowerRadiusX * lowerSnowRadiusFactor * randomRange(random, 0.76, 0.92),
-  );
-  const middleRadiusZ = Math.min(
-    middleRadius * crownOvalZ * randomRange(random, 0.84, 1.18),
-    lowerRadiusZ * randomRange(random, 0.48, 0.68),
-    lowerRadiusZ * lowerSnowRadiusFactor * randomRange(random, 0.76, 0.92),
-  );
-  const middleSnowRadiusFactor = randomRange(random, 0.78, 0.94);
+  for (let i = 0; i < lobeCount; i += 1) {
+    const isCore = i === 0;
+    const angle = crownYaw + (i / Math.max(lobeCount, 1)) * Math.PI * 2 + randomRange(random, -0.56, 0.56);
+    const distance = isCore ? canopyRadius * randomRange(random, 0, 0.06) : canopyRadius * spreadFactor * randomRange(random, 0.32, 0.68);
+    const lobeRadius = canopyRadius * (isCore ? randomRange(random, 0.88, 1.06) : randomRange(random, 0.5, 0.72));
+    const lobeX = x + Math.cos(angle) * distance;
+    const lobeZ = z + Math.sin(angle) * distance;
+    const lobeY = canopyBaseY + canopyRadius * randomRange(random, -0.12, 0.24) + (isCore ? canopyRadius * 0.04 : 0);
+    const scaleX = lobeRadius * spreadFactor * randomRange(random, 0.76, 1.08);
+    const scaleY = lobeRadius * verticalFactor * randomRange(random, 0.68, 1.0);
+    const scaleZ = lobeRadius * randomRange(random, 0.68, 1.08);
+    const targetMatrices = isCore || random() < 0.58 ? roundedCanopyMatrices : coarseCanopyMatrices;
 
-  const upperRadius = totalHeight * randomRange(random, 0.062, 0.125) * crownSpread;
-  const upperRadiusX = Math.min(
-    upperRadius * crownOvalX * randomRange(random, 0.76, 1.22),
-    middleRadiusX * randomRange(random, 0.46, 0.68),
-    middleRadiusX * middleSnowRadiusFactor * randomRange(random, 0.76, 0.92),
-  );
-  const upperRadiusZ = Math.min(
-    upperRadius * crownOvalZ * randomRange(random, 0.78, 1.22),
-    middleRadiusZ * randomRange(random, 0.46, 0.68),
-    middleRadiusZ * middleSnowRadiusFactor * randomRange(random, 0.76, 0.92),
-  );
+    setMatrix(
+      dummy,
+      lobeX,
+      lobeY,
+      lobeZ,
+      angle + randomRange(random, -0.35, 0.35),
+      leanX * 0.5 + randomRange(random, -0.05, 0.05),
+      leanZ * 0.5 + randomRange(random, -0.05, 0.05),
+      scaleX,
+      scaleY,
+      scaleZ,
+    );
+    targetMatrices.push(dummy.matrix.clone());
+  }
 
-  const layers = [
-    {
-      bottom: ground + trunkHeight * randomRange(random, 0.3, 0.56),
-      height: totalHeight * randomRange(random, 0.43, 0.58),
-      radiusX: lowerRadiusX,
-      radiusZ: lowerRadiusZ,
-      snowHeight: totalHeight * randomRange(random, 0.13, 0.25),
-      snowRadiusFactor: lowerSnowRadiusFactor,
-      yawOffset: randomRange(random, -0.28, 0.28),
-      offsetX: randomRange(random, -layerJitter, layerJitter),
-      offsetZ: randomRange(random, -layerJitter, layerJitter),
-    },
-    {
-      bottom: ground + trunkHeight + totalHeight * randomRange(random, 0.08, 0.18),
-      height: totalHeight * randomRange(random, 0.34, 0.48),
-      radiusX: middleRadiusX,
-      radiusZ: middleRadiusZ,
-      snowHeight: totalHeight * randomRange(random, 0.12, 0.23),
-      snowRadiusFactor: middleSnowRadiusFactor,
-      yawOffset: randomRange(random, -0.35, 0.35),
-      offsetX: randomRange(random, -layerJitter, layerJitter),
-      offsetZ: randomRange(random, -layerJitter, layerJitter),
-    },
-    {
-      bottom: ground + trunkHeight + totalHeight * randomRange(random, 0.28, 0.4),
-      height: totalHeight * randomRange(random, 0.28, 0.42),
-      radiusX: upperRadiusX,
-      radiusZ: upperRadiusZ,
-      snowHeight: totalHeight * randomRange(random, 0.11, 0.22),
-      snowRadiusFactor: randomRange(random, 0.76, 0.9),
-      yawOffset: randomRange(random, -0.42, 0.42),
-      offsetX: randomRange(random, -layerJitter, layerJitter),
-      offsetZ: randomRange(random, -layerJitter, layerJitter),
-    },
-  ];
+  const highlightCount = random() < 0.82 ? 1 : 2;
+  for (let i = 0; i < highlightCount; i += 1) {
+    const glintAngle = crownYaw - 0.78 + randomRange(random, -0.52, 0.52);
+    const glintDistance = canopyRadius * spreadFactor * randomRange(random, 0.2, 0.46);
+    const glintRadius = canopyRadius * randomRange(random, 0.22, 0.36);
 
-  addTreeLayerMatrix(dummy, lowerNeedleMatrices, lowerSnowMatrices, layers[0], x, z, yaw, leanX, leanZ);
-  addTreeLayerMatrix(dummy, middleNeedleMatrices, middleSnowMatrices, layers[1], x, z, yaw, leanX, leanZ);
-  addTreeLayerMatrix(dummy, upperNeedleMatrices, upperSnowMatrices, layers[2], x, z, yaw, leanX, leanZ);
-}
-
-function addTreeLayerMatrix(dummy, needleMatrices, snowMatrices, layer, x, z, yaw, leanX, leanZ) {
-  const layerX = x + layer.offsetX;
-  const layerZ = z + layer.offsetZ;
-  const layerYaw = yaw + layer.yawOffset;
-  const centerY = layer.bottom + layer.height / 2;
-  setMatrix(dummy, layerX, centerY, layerZ, layerYaw, leanX, leanZ, layer.radiusX, layer.height, layer.radiusZ);
-  needleMatrices.push(dummy.matrix.clone());
-
-  const snowY = layer.bottom + layer.height - layer.snowHeight / 2 + 0.04;
-  const snowRadiusX = layer.radiusX * layer.snowRadiusFactor;
-  const snowRadiusZ = layer.radiusZ * layer.snowRadiusFactor;
-  setMatrix(dummy, layerX, snowY, layerZ, layerYaw, leanX, leanZ, snowRadiusX, layer.snowHeight, snowRadiusZ);
-  snowMatrices.push(dummy.matrix.clone());
+    setMatrix(
+      dummy,
+      x + Math.cos(glintAngle) * glintDistance,
+      canopyBaseY + canopyRadius * randomRange(random, 0.08, 0.34),
+      z + Math.sin(glintAngle) * glintDistance,
+      glintAngle,
+      leanX * 0.4,
+      leanZ * 0.4,
+      glintRadius * randomRange(random, 0.82, 1.38),
+      glintRadius * randomRange(random, 0.48, 0.8),
+      glintRadius * randomRange(random, 0.72, 1.2),
+    );
+    lightCanopyMatrices.push(dummy.matrix.clone());
+  }
 }
 
 function addTreeInstancedMesh(scene, geometry, material, matrices, name) {
@@ -795,22 +784,41 @@ function addFogBoundaryPlane(scene) {
 
 function addScaleReference(scene) {
   const geometry = new THREE.BufferGeometry();
-  const y = renderHeightMetersAt(-500, -500) + 3;
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute([-500, y, -500, 500, y, -500, -500, y, 500, -500, y, -500], 3),
-  );
-  const line = new THREE.Line(
+  const positions = [];
+  appendTerrainEdgeSegments(positions, -500, -500, 500, -500, 56);
+  appendTerrainEdgeSegments(positions, -500, -500, -500, 500, 56);
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  const line = new THREE.LineSegments(
     geometry,
     new THREE.LineBasicMaterial({
-      color: 0x8c979a,
+      color: 0x789088,
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.62,
       fog: true,
     }),
   );
   line.name = "1 km terrain boundary corner reference";
   scene.add(line);
+}
+
+function appendTerrainEdgeSegments(positions, startX, startZ, endX, endZ, segments) {
+  let previous = null;
+
+  for (let i = 0; i <= segments; i += 1) {
+    const t = i / segments;
+    const point = [
+      THREE.MathUtils.lerp(startX, endX, t),
+      0,
+      THREE.MathUtils.lerp(startZ, endZ, t),
+    ];
+    point[1] = renderHeightMetersAt(point[0], point[2]) + 2.4;
+
+    if (previous) {
+      positions.push(previous[0], previous[1], previous[2], point[0], point[1], point[2]);
+    }
+
+    previous = point;
+  }
 }
 
 function applyRadialFogToScene(scene) {
@@ -901,23 +909,32 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, radialFogColor, radialFogAmount);`,
   material.needsUpdate = true;
 }
 
-function snowColorAt(x, z, elevation, slope) {
-  const normalizedElevation = THREE.MathUtils.clamp((elevation + 52) / 245, 0, 1);
-  const windNoise = fbm(x * 0.018 - 7, z * 0.018 + 13, 4);
-  const driftNoise = fbm(x * 0.006 + 22, z * 0.006 - 4, 5);
-  const base = new THREE.Color(0xe5ecec);
-  const highSnow = new THREE.Color(0xf8fbf8);
-  const blueShadow = new THREE.Color(0xb5c5cc);
-  const windScour = new THREE.Color(0x9ea8aa);
-  const exposedRock = new THREE.Color(0x6f7472);
+function humidTerrainColorAt(x, z, elevation, slope) {
+  const across = Math.abs(x - riverAxisAt(z));
+  const normalizedElevation = THREE.MathUtils.clamp((elevation + 64) / 400, 0, 1);
+  const moisture = THREE.MathUtils.clamp(1 - across / 280, 0, 1);
+  const canopyNoise = fbm(x * 0.017 - 12, z * 0.017 + 7, 5);
+  const scarNoise = fbm(x * 0.036 + 18, z * 0.036 - 22, 3);
+  const base = new THREE.Color(0x2f5a3f);
+  const wetLowland = new THREE.Color(0x213f32);
+  const upperForest = new THREE.Color(0x536d42);
+  const fernHighlight = new THREE.Color(0x6d824f);
+  const clayScar = new THREE.Color(0x8b795f);
+  const wetStone = new THREE.Color(0x59665e);
+  const riverMoss = new THREE.Color(0x24483b);
 
-  base.lerp(highSnow, normalizedElevation * 0.45 + driftNoise * 0.15);
-  base.lerp(blueShadow, THREE.MathUtils.clamp(slope * 0.42, 0, 0.34));
+  base.lerp(wetLowland, moisture * 0.28);
+  base.lerp(upperForest, normalizedElevation * 0.34 + canopyNoise * 0.14);
 
-  if (slope > 0.55 && windNoise > 0.57) {
-    base.lerp(exposedRock, THREE.MathUtils.clamp((slope - 0.45) * 1.6, 0.18, 0.48));
-  } else if (windNoise > 0.66) {
-    base.lerp(windScour, 0.16);
+  if (canopyNoise > 0.62) {
+    base.lerp(fernHighlight, 0.14);
+  }
+
+  base.lerp(riverMoss, Math.exp(-Math.pow(across / 58, 2)) * 0.26);
+  base.lerp(wetStone, THREE.MathUtils.clamp(slope * 0.18, 0, 0.2));
+
+  if (slope > 0.48 && scarNoise > 0.6) {
+    base.lerp(clayScar, THREE.MathUtils.clamp((slope - 0.44) * 1.55, 0.16, 0.5));
   }
 
   return base;
@@ -962,7 +979,7 @@ function createRibbonGeometry(points, width, yOffset = 0.25) {
 
 function gully(across, along, alongCenter, alongScale) {
   return (
-    Math.exp(-Math.pow(across / 38, 2)) *
+    Math.exp(-Math.pow(across / 40, 2)) *
     Math.exp(-Math.pow((along - alongCenter) / alongScale, 2))
   );
 }
