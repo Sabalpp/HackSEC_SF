@@ -224,14 +224,89 @@
     return new THREE.Vector3(p[0], p[1], p[2]);
   }
 
+  function drawCamoBlob(ctx, spec, tileSize) {
+    const steps = 28;
+    for (let ox = -tileSize; ox <= tileSize; ox += tileSize) {
+      for (let oy = -tileSize; oy <= tileSize; oy += tileSize) {
+        ctx.save();
+        ctx.translate(spec.x + ox, spec.y + oy);
+        ctx.rotate(spec.rotation);
+        ctx.scale(spec.scaleX, spec.scaleY);
+        ctx.beginPath();
+        for (let i = 0; i < steps; i += 1) {
+          const angle = (i / steps) * Math.PI * 2;
+          const wobble =
+            1 +
+            Math.sin(angle * 2.0 + spec.phase) * 0.18 +
+            Math.cos(angle * 3.5 - spec.phase * 0.7) * 0.12 +
+            Math.sin(angle * 5.0 + spec.phase * 1.6) * 0.07;
+          const x = Math.cos(angle) * spec.radius * wobble;
+          const y = Math.sin(angle) * spec.radius * wobble;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = spec.color;
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  function createWoodlandCamoTexture(THREE) {
+    if (typeof document === "undefined") return null;
+
+    const tileSize = 512;
+    const canvas = document.createElement("canvas");
+    canvas.width = tileSize;
+    canvas.height = tileSize;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    ctx.fillStyle = "#36543a";
+    ctx.fillRect(0, 0, tileSize, tileSize);
+
+    const blobs = [
+      { color: "#101112", x: 88, y: 26, radius: 44, scaleX: 2.65, scaleY: 0.56, rotation: -0.03, phase: 0.3 },
+      { color: "#3d3a34", x: 328, y: 12, radius: 56, scaleX: 2.15, scaleY: 0.74, rotation: 0.08, phase: 1.2 },
+      { color: "#a7a983", x: 116, y: 82, radius: 54, scaleX: 2.25, scaleY: 0.70, rotation: 0.12, phase: 2.1 },
+      { color: "#101112", x: 386, y: 80, radius: 43, scaleX: 2.45, scaleY: 0.58, rotation: 0.05, phase: 2.8 },
+      { color: "#3d3a34", x: 118, y: 154, radius: 47, scaleX: 2.35, scaleY: 0.70, rotation: -0.12, phase: 3.5 },
+      { color: "#101112", x: 250, y: 176, radius: 39, scaleX: 2.05, scaleY: 0.62, rotation: -0.10, phase: 0.9 },
+      { color: "#a7a983", x: 376, y: 176, radius: 58, scaleX: 2.10, scaleY: 0.72, rotation: -0.08, phase: 1.7 },
+      { color: "#101112", x: 90, y: 252, radius: 42, scaleX: 2.75, scaleY: 0.58, rotation: 0.04, phase: 4.4 },
+      { color: "#a7a983", x: 176, y: 292, radius: 48, scaleX: 2.45, scaleY: 0.64, rotation: 0.02, phase: 5.1 },
+      { color: "#101112", x: 322, y: 308, radius: 43, scaleX: 2.20, scaleY: 0.60, rotation: 0.10, phase: 3.1 },
+      { color: "#3d3a34", x: 404, y: 360, radius: 55, scaleX: 2.35, scaleY: 0.74, rotation: 0.06, phase: 4.8 },
+      { color: "#101112", x: 60, y: 404, radius: 42, scaleX: 2.40, scaleY: 0.56, rotation: -0.02, phase: 5.9 },
+      { color: "#a7a983", x: 190, y: 430, radius: 57, scaleX: 2.35, scaleY: 0.72, rotation: -0.04, phase: 2.6 },
+      { color: "#3d3a34", x: 232, y: 486, radius: 51, scaleX: 2.60, scaleY: 0.70, rotation: 0.04, phase: 1.4 },
+      { color: "#101112", x: 392, y: 492, radius: 43, scaleX: 2.30, scaleY: 0.58, rotation: -0.09, phase: 0.6 },
+      { color: "#2f4b33", x: 462, y: 246, radius: 62, scaleX: 2.05, scaleY: 0.78, rotation: -0.05, phase: 2.2 }
+    ];
+
+    blobs.forEach((blob) => drawCamoBlob(ctx, blob, tileSize));
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1.65, 1.65);
+    texture.anisotropy = 4;
+    texture.needsUpdate = true;
+    return texture;
+  }
+
   function makeMaterials(THREE, options) {
     const ghostExterior = Boolean(options.ghostExterior && options.showInternal);
     const exteriorOpacity = ghostExterior ? 0.42 : 1.0;
     const exteriorTransparent = ghostExterior;
+    const woodlandCamoTexture = createWoodlandCamoTexture(THREE);
 
-    const standard = (color, roughness = 0.72, metalness = 0.16, opacity = 1.0) =>
+    const standard = (color, roughness = 0.72, metalness = 0.16, opacity = 1.0, map = null) =>
       new THREE.MeshStandardMaterial({
-        color,
+        color: map ? 0xffffff : color,
+        map,
         roughness,
         metalness,
         transparent: opacity < 1,
@@ -239,21 +314,18 @@
       });
 
     return {
-      body: standard(COLORS.body, 0.84, 0.12, exteriorOpacity),
-      panel: standard(COLORS.panel, 0.68, 0.22, exteriorOpacity),
-      armorDark: standard(COLORS.armorDark, 0.86, 0.14, exteriorOpacity),
-      camoBrown: standard(COLORS.camoBrown, 0.82, 0.10, exteriorOpacity),
-      camoTan: standard(COLORS.camoTan, 0.78, 0.08, exteriorOpacity),
-      rubber: standard(COLORS.rubber, 0.94, 0.02, exteriorOpacity),
-      metal: standard(COLORS.metal, 0.46, 0.62, exteriorOpacity),
-      glass: new THREE.MeshPhysicalMaterial({
-        color: COLORS.glass,
-        roughness: 0.18,
-        metalness: 0.0,
-        transmission: 0.0,
-        transparent: exteriorTransparent,
-        opacity: exteriorOpacity
-      }),
+      body: standard(COLORS.body, 0.84, 0.12, exteriorOpacity, woodlandCamoTexture),
+      panel: standard(COLORS.panel, 0.68, 0.22, exteriorOpacity, woodlandCamoTexture),
+      armorDark: standard(COLORS.armorDark, 0.86, 0.14, exteriorOpacity, woodlandCamoTexture),
+      camoBrown: standard(COLORS.camoBrown, 0.82, 0.10, exteriorOpacity, woodlandCamoTexture),
+      camoTan: standard(COLORS.camoTan, 0.78, 0.08, exteriorOpacity, woodlandCamoTexture),
+      rubber: standard(COLORS.rubber, 0.94, 0.02, exteriorOpacity, woodlandCamoTexture),
+      metal: standard(COLORS.metal, 0.46, 0.62, exteriorOpacity, woodlandCamoTexture),
+      wheelRubber: standard(COLORS.rubber, 0.94, 0.02, exteriorOpacity),
+      wheelDark: standard(COLORS.armorDark, 0.86, 0.14, exteriorOpacity),
+      wheelRim: standard(COLORS.panel, 0.68, 0.22, exteriorOpacity),
+      wheelMetal: standard(COLORS.metal, 0.46, 0.62, exteriorOpacity),
+      glass: standard(COLORS.glass, 0.66, 0.08, exteriorOpacity, woodlandCamoTexture),
       yellow: standard(COLORS.yellow, 0.54, 0.24, exteriorOpacity),
       red: standard(COLORS.red, 0.56, 0.14, exteriorOpacity),
       internalBattery: standard(COLORS.internalBattery, 0.48, 0.18, 0.62),
@@ -357,6 +429,19 @@
       1, 5, 6, 1, 6, 2
     ];
     geom.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+    const zMin = Math.min(zRearBottom, zFrontBottom, zRearTop, zFrontTop);
+    const zMax = Math.max(zRearBottom, zFrontBottom, zRearTop, zFrontTop);
+    const zSpan = zMax - zMin || 1;
+    geom.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([
+      0, (zRearBottom - zMin) / zSpan,
+      1, (zFrontBottom - zMin) / zSpan,
+      1, (zFrontTop - zMin) / zSpan,
+      0, (zRearTop - zMin) / zSpan,
+      0, (zRearBottom - zMin) / zSpan,
+      1, (zFrontBottom - zMin) / zSpan,
+      1, (zFrontTop - zMin) / zSpan,
+      0, (zRearTop - zMin) / zSpan
+    ]), 2));
     geom.setIndex(indices);
     geom.computeVertexNormals();
 
@@ -372,21 +457,21 @@
     wheel.name = name;
     wheel.position.set(x, y, z);
     const outward = Math.sign(y) || 1;
-    wheel.add(makeCylinder(THREE, materials, [0, 0, 0], radius, width, "y", "rubber", `${name}_tire`, 36));
+    wheel.add(makeCylinder(THREE, materials, [0, 0, 0], radius, width, "y", "wheelRubber", `${name}_tire`, 36));
     for (let a = 0; a < Math.PI * 2; a += Math.PI / 10) {
       const lug = makeBox(
         THREE,
         materials,
         [Math.cos(a) * radius * 0.96, outward * (width * 0.50 + 0.006), Math.sin(a) * radius * 0.96],
         [radius * 0.24, 0.014, radius * 0.055],
-        "armorDark",
+        "wheelDark",
         `${name}_tire_lug`
       );
       lug.rotation.y = -a;
       wheel.add(lug);
     }
-    wheel.add(makeCylinder(THREE, materials, [0, outward * 0.003, 0], radius * 0.74, width + 0.004, "y", "panel", `${name}_rim`, 36));
-    wheel.add(makeCylinder(THREE, materials, [0, outward * 0.006, 0], hub, width + 0.008, "y", "metal", `${name}_hub`, 24));
+    wheel.add(makeCylinder(THREE, materials, [0, outward * 0.003, 0], radius * 0.74, width + 0.004, "y", "wheelRim", `${name}_rim`, 36));
+    wheel.add(makeCylinder(THREE, materials, [0, outward * 0.006, 0], hub, width + 0.008, "y", "wheelMetal", `${name}_hub`, 24));
     for (let a = 0; a < Math.PI * 2; a += Math.PI / 3) {
       wheel.add(makeCylinder(
         THREE,
@@ -395,7 +480,7 @@
         0.004,
         0.008,
         "y",
-        "metal",
+        "wheelMetal",
         `${name}_bolt`
       ));
     }
@@ -421,7 +506,7 @@
     track.add(makeBox(THREE, materials, [0, innerY, 0.222], [1.42, 0.044, 0.168], "armorDark", "wheeled_suspension_beam"));
 
     [-0.430, 0.000, 0.430].forEach((x, index) => {
-      track.add(makeCylinder(THREE, materials, [x, side * 0.348, 0.170], 0.018, 0.092, "y", "metal", `wheel_${index + 1}_stub_axle`));
+      track.add(makeCylinder(THREE, materials, [x, side * 0.348, 0.170], 0.018, 0.092, "y", "wheelMetal", `wheel_${index + 1}_stub_axle`));
       addWheel(x, 0.170, 0.176, 0.048, 0.046, `large_circular_tire_${index + 1}`);
     });
 
