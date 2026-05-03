@@ -1041,8 +1041,13 @@
     const camera = new THREE.PerspectiveCamera(46, 1, 0.01, 100);
     camera.up.set(0, 0, 1);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: false,
+      powerPreference: "high-performance"
+    });
+    const maxPixelRatio = options.maxPixelRatio ?? 1.75;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxPixelRatio));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1095,25 +1100,53 @@
     }
 
     window.addEventListener("resize", resize);
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
+    if (resizeObserver) resizeObserver.observe(host);
     resize();
 
-    let animationFrame = 0;
     let running = true;
     let autoRotateEnabled = Boolean(options.autoRotate);
     let propSpinEnabled = options.spinProp ?? true;
+    let previousTimestamp = null;
+    const maxDeltaSeconds = 0.05;
+    const fallbackDeltaSeconds = 1 / 60;
+    const autoRotateRadiansPerSecond = options.autoRotateRadiansPerSecond ?? 0.18;
+    const propSpinRadiansPerSecond = options.propSpinRadiansPerSecond ?? 18.0;
 
-    function animate() {
+    function animationDeltaSeconds(timestamp) {
+      const now = Number.isFinite(timestamp)
+        ? timestamp
+        : (typeof performance !== "undefined" ? performance.now() : Date.now());
+      if (previousTimestamp === null) {
+        previousTimestamp = now;
+        return fallbackDeltaSeconds;
+      }
+      const delta = Math.max(0, (now - previousTimestamp) / 1000);
+      previousTimestamp = now;
+      return Math.min(delta || fallbackDeltaSeconds, maxDeltaSeconds);
+    }
+
+    function animate(timestamp) {
       if (!running) return;
-      animationFrame = window.requestAnimationFrame(animate);
+      const deltaSeconds = animationDeltaSeconds(timestamp);
       if (autoRotateEnabled) {
-        controls.state.azimuth -= 0.003;
+        controls.state.azimuth -= autoRotateRadiansPerSecond * deltaSeconds;
         controls.update();
       }
       const prop = asset.group.getObjectByName("animated_two_blade_propeller");
-      if (prop && propSpinEnabled) prop.rotation.x += 0.22;
+      if (prop && propSpinEnabled) {
+        prop.rotation.x = (prop.rotation.x + propSpinRadiansPerSecond * deltaSeconds) % (Math.PI * 2);
+      }
       renderer.render(scene, camera);
     }
-    animate();
+
+    renderer.setAnimationLoop(animate);
+
+    function resetAnimationClock() {
+      previousTimestamp = null;
+    }
+
+    document.addEventListener("visibilitychange", resetAnimationClock);
 
     return {
       scene,
@@ -1135,8 +1168,10 @@
       },
       dispose() {
         running = false;
-        if (animationFrame) window.cancelAnimationFrame(animationFrame);
+        renderer.setAnimationLoop(null);
         window.removeEventListener("resize", resize);
+        if (resizeObserver) resizeObserver.disconnect();
+        document.removeEventListener("visibilitychange", resetAnimationClock);
         controls.dispose();
         renderer.dispose();
         if (renderer.domElement.parentElement) renderer.domElement.parentElement.removeChild(renderer.domElement);
