@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { generate } from "@pdfme/generator";
 import initPhysicsEngine, { Engine as PhysicsEngine } from "../../pkg/engine.js";
 import { theaters } from "../data/theaters";
+import costDataCsv from "../data/cost_data.csv?raw";
 import { TheaterEnvironment } from "./TheaterEnvironment";
 import landforgeIcon from "../assets/landforge-icon.png";
 
@@ -73,6 +75,8 @@ const REPORT_CHART_WIDTH = 180;
 const REPORT_CHART_HEIGHT = 48;
 const PDF_PAGE_WIDTH = 612;
 const PDF_PAGE_HEIGHT = 792;
+const PDFME_PAGE_WIDTH_MM = 210;
+const PDFME_PAGE_HEIGHT_MM = 297;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CALENDAR_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const CALENDAR_MONTH_FORMATTER = new Intl.DateTimeFormat("en-US", {
@@ -311,6 +315,40 @@ const reasonNumber = (value, digits = 0) => {
 };
 
 const RESEARCH_SOURCE_NOTE = "research/Skunk Works v2.pdf and research/Skunk Works v2 copy.pdf";
+const COST_SOURCE_NOTE = "Cost values are planning assumptions; component and environment triggers come from the Skunk Works dataset PDFs.";
+const COST_FORMATTER = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+
+const parseCostDataCsv = (csv) => {
+  const [headerLine, ...lines] = csv.trim().split(/\r?\n/);
+  const headers = headerLine.split(",");
+  return lines.reduce((groups, line) => {
+    const values = line.split(",");
+    const row = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""]));
+    const vehicleId = row.vehicle_id || "ugv";
+    const baseline = {
+      sourceLabel: row.source_component,
+      label: row.report_component,
+      subsystem: row.subsystem,
+      parent: row.parent === "true",
+      replacementCost: Number(row.replacement_cost_usd) || 0,
+      inspectionCost: Number(row.inspection_cost_usd) || 0,
+    };
+
+    return {
+      ...groups,
+      [vehicleId]: [...(groups[vehicleId] ?? []), baseline],
+    };
+  }, {});
+};
+
+const COST_COMPONENT_BASELINES_BY_VEHICLE = parseCostDataCsv(costDataCsv);
+const COST_DATASET_ROW_COUNT = Math.max(
+  ...Object.values(COST_COMPONENT_BASELINES_BY_VEHICLE).map((rows) => rows.length),
+);
 
 const RESEARCH_MECHANISMS = {
   extreme_heat: {
@@ -1491,7 +1529,7 @@ const buildLegacyReportPdf = (report) => {
   return pdf;
 };
 
-const buildReportPdf = (report) => {
+const buildDetailedReportPdf = (report) => {
   const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
   const finalHealth = clampHealthUnit(finalSnapshot.vehicle_health ?? 1);
   const failures = buildFailureSummary(report.series, report.inputs, report.durationDays);
@@ -1790,8 +1828,1086 @@ const buildReportPdf = (report) => {
   return buildPdfObjects();
 };
 
-const downloadReportPdf = (report) => {
-  const blob = new Blob([buildReportPdf(report)], { type: "application/pdf" });
+const cleanPdfmeText = (value) => (
+  String(value ?? "")
+    .replace(/[^\x20-\x7E\n]/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .trim()
+);
+
+const humanizeMaterialName = (value) => (
+  cleanPdfmeText(value)
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+    .replace(/\bGRP\b/g, "GRP")
+    .replace(/\bCFRP\b/g, "CFRP")
+    .replace(/\bAH\b/g, "AH")
+    .replace(/\bDH\b/g, "DH")
+    .replace(/\bEH\b/g, "EH")
+);
+
+const wrapPdfmeText = (value, maxChars, maxLines = 4) => {
+  const lines = wrapPdfText(cleanPdfmeText(value), maxChars);
+  const visibleLines = lines.slice(0, maxLines);
+  if (lines.length > maxLines && visibleLines.length) {
+    visibleLines[visibleLines.length - 1] = `${visibleLines[visibleLines.length - 1].replace(/\.*$/, "")}...`;
+  }
+  return visibleLines.join("\n");
+};
+
+const executiveRiskLevel = ({ finalHealth, failedParentCount, failureCount, activeDriverCount }) => {
+  if (failedParentCount > 0 || failureCount >= 4 || finalHealth < 0.45) return "Critical";
+  if (failureCount > 0 || finalHealth < 0.68) return "High";
+  if (activeDriverCount >= 2 || finalHealth < 0.84) return "Moderate";
+  return "Low";
+};
+
+const executiveStatusForRisk = (riskLevel) => {
+  switch (riskLevel) {
+    case "Critical":
+      return "Not Mission Ready";
+    case "High":
+      return "Mission At Risk";
+    case "Moderate":
+      return "Ready With Controls";
+    default:
+      return "Ready";
+  }
+};
+
+const executiveRiskColor = (riskLevel) => {
+  switch (riskLevel) {
+    case "Critical":
+      return "#991b1b";
+    case "High":
+      return "#b45309";
+    case "Moderate":
+      return "#1d4ed8";
+    default:
+      return "#15803d";
+  }
+};
+
+const executiveRecommendation = (riskLevel) => {
+  switch (riskLevel) {
+    case "Critical":
+      return "Do not deploy as planned. Replace failed critical components or change the operating profile before release.";
+    case "High":
+      return "Deploy only with mitigation. Pre-stage spares, reduce exposure time, and inspect the main risk area before launch.";
+    case "Moderate":
+      return "Deploy with controls. Monitor the top subsystem and limit exposure to the active environmental drivers.";
+    default:
+      return "Deploy. Keep normal inspection cadence and preserve the current material and operating assumptions.";
+  }
+};
+
+const buildExecutiveReportModel = (report) => {
+  const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
+  const finalHealth = clampHealthUnit(finalSnapshot.vehicle_health ?? 1);
+  const failures = buildFailureSummary(report.series, report.inputs, report.durationDays);
+  const activeDrivers = ENVIRONMENT_FAILURE_FACTORS
+    .filter((factor) => factor.isActive(report.inputs ?? {}))
+    .map((factor) => ({
+      label: factor.label,
+      description: factor.describe(report.inputs ?? {}),
+    }));
+  const parentItems = VEHICLE_HEALTH_GROUPS.map((group) => ({
+    id: group.subsystem,
+    label: group.label,
+    subsystem: group.subsystem,
+    parent: true,
+    children: group.children ?? [],
+  }));
+  const parentRisks = parentItems
+    .map((item) => {
+      const health = healthValueForItem(finalSnapshot, item);
+      const failedDay = failedDayForItem(report.series, item);
+      const importance = importanceForItem(item);
+      const failure = failures.find((entry) => entry.subsystem === item.subsystem);
+      return {
+        ...item,
+        health,
+        failedDay,
+        importance,
+        reason: failure?.reason ?? failureReasonForItem(item, report.inputs, report.durationDays),
+      };
+    })
+    .sort((a, b) => (
+      Number(b.failedDay !== null) - Number(a.failedDay !== null) ||
+      b.importance.rank - a.importance.rank ||
+      a.health - b.health
+    ));
+  const failedParentCount = parentRisks.filter((item) => item.failedDay !== null).length;
+  const riskLevel = executiveRiskLevel({
+    finalHealth,
+    failedParentCount,
+    failureCount: failures.length,
+    activeDriverCount: activeDrivers.length,
+  });
+  const lowestParent = [...parentRisks].sort((a, b) => a.health - b.health)[0];
+  const topDrivers = activeDrivers.length
+    ? activeDrivers
+    : [{ label: "No threshold driver", description: "Inputs did not cross the modeled high-risk environmental thresholds." }];
+  const driverSummary = topDrivers.slice(0, 2).map((driver) => driver.label.toLowerCase()).join(" and ");
+  const criticalText = failures.length
+    ? `${failures.length} tracked components cross the failure threshold.`
+    : "No tracked component crosses the failure threshold.";
+  const summary = `${criticalText} The limiting area is ${lowestParent?.label ?? "the vehicle"} at ${formatHealthPercent(lowestParent?.health ?? finalHealth)} final health, driven mainly by ${driverSummary}.`;
+  const actions = [
+    failures.length
+      ? `Replace or inspect failed components before deployment; first failure appears on day ${Math.min(...failures.map((failure) => failure.failedDay))}.`
+      : "Keep the planned mission profile; no modeled failure threshold is crossed.",
+    activeDrivers.length
+      ? `Mitigate ${topDrivers.slice(0, 2).map((driver) => driver.label.toLowerCase()).join(" and ")} before launch.`
+      : "Maintain baseline environmental controls; no high-risk driver is active.",
+    `Prioritize ${lowestParent?.label ?? "vehicle"} checks because it ends lowest among the main subsystems.`,
+    `Re-run the simulation if duration, material, or theater conditions change materially.`,
+  ];
+
+  return {
+    finalSnapshot,
+    finalHealth,
+    failures,
+    parentRisks,
+    topRisks: parentRisks.slice(0, 3),
+    activeDrivers: topDrivers,
+    riskLevel,
+    status: executiveStatusForRisk(riskLevel),
+    recommendation: executiveRecommendation(riskLevel),
+    summary,
+    actions,
+    materialName: humanizeMaterialName(report.material),
+    durationLabel: `${report.durationDays} days`,
+    unitLabel: report.unitLabel,
+  };
+};
+
+const formatCostUsd = (value) => COST_FORMATTER.format(Math.round(value));
+
+const costItemForBaseline = (baseline) => {
+  if (baseline.parent) {
+    return REPORT_HEALTH_ITEMS.find((item) => item.subsystem === baseline.subsystem && item.parent);
+  }
+  return REPORT_HEALTH_ITEMS.find((item) => (
+    item.subsystem === baseline.subsystem &&
+    item.label === baseline.sourceLabel
+  ));
+};
+
+const roundCost = (value) => Math.round(value / 25) * 25;
+
+const costStatusForRow = (finalHealth, failedDay) => {
+  if (failedDay !== null) return "Replacement";
+  if (finalHealth < 0.7) return "Corrective reserve";
+  if (finalHealth < 0.9) return "Preventive service";
+  return "Monitor";
+};
+
+const buildCostReportModel = (report, executiveModel = buildExecutiveReportModel(report)) => {
+  const vehicleIdForCost = report.vehicleId === "drone" ? "drone" : "ugv";
+  const componentBaselines =
+    COST_COMPONENT_BASELINES_BY_VEHICLE[vehicleIdForCost] ??
+    COST_COMPONENT_BASELINES_BY_VEHICLE.ugv;
+  const hasActiveDrivers = executiveModel.activeDrivers.some((driver) => (
+    driver.label !== "No threshold driver"
+  ));
+  const rows = componentBaselines.map((baseline) => {
+    const item = costItemForBaseline(baseline);
+    const finalHealth = item
+      ? healthValueForItem(report.series[report.series.length - 1]?.snapshot, item)
+      : 1;
+    const startHealth = item ? healthValueForItem(report.series[0]?.snapshot, item) : 1;
+    const failedDay = item ? failedDayForItem(report.series, item) : null;
+    const degradation = Math.max(0, startHealth - finalHealth);
+    const replacementCost = baseline.replacementCost;
+    const inspectionCost = baseline.inspectionCost;
+    const status = costStatusForRow(finalHealth, failedDay);
+    let estimatedCost;
+    let reason;
+
+    if (failedDay !== null) {
+      estimatedCost = replacementCost + inspectionCost;
+      reason = `Failed on day ${failedDay}; plan replacement plus inspection.`;
+    } else if (finalHealth < 0.7) {
+      estimatedCost = inspectionCost + replacementCost * (0.45 + (0.7 - finalHealth) * 0.75);
+      reason = "Low readiness; reserve corrective maintenance budget.";
+    } else if (finalHealth < 0.9) {
+      estimatedCost = inspectionCost + replacementCost * (0.12 + (0.9 - finalHealth) * 0.5);
+      reason = "Moderate wear; schedule preventive service.";
+    } else if (degradation > 0.02 || hasActiveDrivers) {
+      estimatedCost = inspectionCost + replacementCost * degradation * 0.2;
+      reason = "Environmental exposure warrants inspection and wear reserve.";
+    } else {
+      estimatedCost = inspectionCost * 0.35;
+      reason = "No failure; monitor at normal interval.";
+    }
+
+    return {
+      ...baseline,
+      item,
+      finalHealth,
+      startHealth,
+      degradation,
+      failedDay,
+      replacementCost,
+      inspectionCost,
+      status,
+      estimatedCost: roundCost(estimatedCost),
+      reason,
+    };
+  }).sort((a, b) => (
+    b.estimatedCost - a.estimatedCost ||
+    a.label.localeCompare(b.label)
+  ));
+  const totalEstimatedCost = rows.reduce((sum, row) => sum + row.estimatedCost, 0);
+  const replacementExposure = rows
+    .filter((row) => row.status === "Replacement")
+    .reduce((sum, row) => sum + row.estimatedCost, 0);
+  const preventiveExposure = rows
+    .filter((row) => row.status !== "Replacement")
+    .reduce((sum, row) => sum + row.estimatedCost, 0);
+  const topCostDrivers = rows.slice(0, 4);
+
+  return {
+    rows,
+    vehicleId: vehicleIdForCost,
+    profileLabel: vehicleIdForCost === "drone" ? "Air Unit cost profile" : "Land Unit cost profile",
+    datasetRowsUsed: componentBaselines.length,
+    totalEstimatedCost,
+    replacementExposure,
+    preventiveExposure,
+    topCostDrivers,
+    formattedTotal: formatCostUsd(totalEstimatedCost),
+    sourceNote: `${COST_SOURCE_NOTE} Profile: ${vehicleIdForCost === "drone" ? "Air Unit" : "Land Unit"}; rows used: ${componentBaselines.length}/${COST_DATASET_ROW_COUNT}.`,
+  };
+};
+
+const pdfmeTextField = (name, x, y, width, height, options = {}) => ({
+  name,
+  type: "text",
+  position: { x, y },
+  width,
+  height,
+  fontSize: options.fontSize ?? 8,
+  fontColor: options.fontColor ?? "#0f172a",
+  backgroundColor: options.backgroundColor ?? "#ffffff",
+  alignment: options.alignment ?? "left",
+  verticalAlignment: options.verticalAlignment ?? "top",
+  lineHeight: options.lineHeight ?? 1.15,
+  characterSpacing: 0,
+  dynamicFontSize: options.dynamicFontSize,
+});
+
+const addPdfmeText = (schemas, input, name, value, x, y, width, height, options = {}) => {
+  schemas.push(pdfmeTextField(name, x, y, width, height, options));
+  input[name] = cleanPdfmeText(value) || " ";
+};
+
+const addPdfmeBox = (schemas, input, name, x, y, width, height, color) => {
+  addPdfmeText(schemas, input, name, " ", x, y, width, height, {
+    backgroundColor: color,
+    fontColor: color,
+    fontSize: 1,
+  });
+};
+
+const addPdfmeMetric = (schemas, input, prefix, x, y, width, label, value, accentColor) => {
+  addPdfmeBox(schemas, input, `${prefix}_box`, x, y, width, 24, "#f8fafc");
+  addPdfmeBox(schemas, input, `${prefix}_accent`, x, y, 2.5, 24, accentColor);
+  addPdfmeText(schemas, input, `${prefix}_label`, label.toUpperCase(), x + 5, y + 4, width - 8, 5, {
+    fontSize: 6.2,
+    fontColor: "#64748b",
+    backgroundColor: "#f8fafc",
+  });
+  addPdfmeText(schemas, input, `${prefix}_value`, value, x + 5, y + 12, width - 8, 9, {
+    fontSize: 10,
+    fontColor: "#0f172a",
+    backgroundColor: "#f8fafc",
+    dynamicFontSize: { min: 7, max: 10, fit: "vertical" },
+  });
+};
+
+const addPdfmeSectionLabel = (schemas, input, name, label, x, y, width) => {
+  addPdfmeText(schemas, input, name, label.toUpperCase(), x, y, width, 7, {
+    fontSize: 7.5,
+    fontColor: "#1d4ed8",
+    backgroundColor: "#ffffff",
+  });
+};
+
+const formatPdfmePointDelta = (value) => {
+  const points = Math.round(value * 100);
+  return `${points >= 0 ? "+" : ""}${points} pts`;
+};
+
+const pdfmeTrendStats = (report, item) => {
+  const firstSnapshot = report.series[0]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
+  const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
+  const values = report.series.map((point) => healthValueForItem(point.snapshot, item));
+  const start = healthValueForItem(firstSnapshot, item);
+  const final = healthValueForItem(finalSnapshot, item);
+  const min = values.length ? Math.min(...values) : final;
+  const failedDay = failedDayForItem(report.series, item);
+
+  return {
+    start,
+    final,
+    min,
+    delta: final - start,
+    failedDay,
+  };
+};
+
+const operationalMeaningForRisk = (risk) => (
+  risk.failedDay === null
+    ? `${risk.label} remains available through the simulated window. Watch it if exposure time increases.`
+    : `${risk.label} becomes mission-limiting on day ${risk.failedDay}. This is a pre-launch correction item.`
+);
+
+const actionForRisk = (risk) => (
+  risk.failedDay === null
+    ? `Inspect ${risk.label.toLowerCase()} at the normal interval and re-check after the first sortie.`
+    : `Replace, repair, or isolate ${risk.label.toLowerCase()} before deployment.`
+);
+
+const addPdfmeReportHeader = (
+  schemas,
+  input,
+  prefix,
+  title,
+  subtitle,
+  pageNumber,
+  totalPages,
+  riskColor,
+) => {
+  addPdfmeText(schemas, input, `${prefix}_brand`, "LANDFORGE", 14, 11, 45, 5, {
+    fontSize: 7,
+    fontColor: "#1d4ed8",
+    backgroundColor: "#ffffff",
+  });
+  addPdfmeText(schemas, input, `${prefix}_page`, `Page ${pageNumber} of ${totalPages}`, 158, 11, 38, 5, {
+    fontSize: 6.2,
+    fontColor: "#64748b",
+    backgroundColor: "#ffffff",
+    alignment: "right",
+  });
+  addPdfmeText(schemas, input, `${prefix}_title`, title, 14, 22, 122, 9, {
+    fontSize: 16,
+    fontColor: "#0f172a",
+    backgroundColor: "#ffffff",
+    dynamicFontSize: { min: 11, max: 16, fit: "vertical" },
+  });
+  addPdfmeText(schemas, input, `${prefix}_subtitle`, subtitle, 14, 36, 154, 7, {
+    fontSize: 6.4,
+    fontColor: "#475569",
+    backgroundColor: "#ffffff",
+  });
+  addPdfmeBox(schemas, input, `${prefix}_rule`, 14, 48, 182, 1.1, riskColor);
+};
+
+const addPdfmeReportFooter = (schemas, input, prefix, pageNumber, totalPages) => {
+  addPdfmeText(schemas, input, `${prefix}_footer`, `Page ${pageNumber} of ${totalPages} | Evidence basis: ${RESEARCH_SOURCE_NOTE}; simulation engine environmental model.`, 14, 286, 182, 5, {
+    fontSize: 5.1,
+    fontColor: "#64748b",
+    backgroundColor: "#ffffff",
+  });
+};
+
+const addPdfmeInfoCard = (
+  schemas,
+  input,
+  prefix,
+  x,
+  y,
+  width,
+  height,
+  title,
+  body,
+  accentColor,
+  options = {},
+) => {
+  const fill = options.fill ?? "#f8fafc";
+  addPdfmeBox(schemas, input, `${prefix}_box`, x, y, width, height, fill);
+  addPdfmeBox(schemas, input, `${prefix}_accent`, x, y, 2.5, height, accentColor);
+  addPdfmeText(schemas, input, `${prefix}_title`, title.toUpperCase(), x + 6, y + 5, width - 12, 5.5, {
+    fontSize: options.titleSize ?? 5.8,
+    fontColor: "#64748b",
+    backgroundColor: fill,
+  });
+  addPdfmeText(schemas, input, `${prefix}_body`, body, x + 6, y + 15, width - 12, height - 18, {
+    fontSize: options.bodySize ?? 6.2,
+    fontColor: options.bodyColor ?? "#334155",
+    backgroundColor: fill,
+    lineHeight: options.lineHeight ?? 1.18,
+    dynamicFontSize: options.dynamicFontSize,
+  });
+};
+
+const buildExecutiveReportPdf = async (report) => {
+  const model = buildExecutiveReportModel(report);
+  const input = {};
+  const page1 = [];
+  const page2 = [];
+  const page3 = [];
+  const page4 = [];
+  const page5 = [];
+  const page6 = [];
+  const page7 = [];
+  const page8 = [];
+  const page9 = [];
+  const totalPages = 9;
+  const riskColor = executiveRiskColor(model.riskLevel);
+  const costModel = buildCostReportModel(report, model);
+  const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
+  const physics = buildPdfPhysicsCards(report, finalSnapshot);
+  const physicsBySubsystem = Object.fromEntries(physics.cards.map((card) => [card.id, card]));
+  const componentItems = REPORT_HEALTH_ITEMS.filter((item) => !item.overall);
+  const itemById = Object.fromEntries(REPORT_HEALTH_ITEMS.map((item) => [item.id, item]));
+  const parentItem = (subsystem) => (
+    REPORT_HEALTH_ITEMS.find((item) => item.subsystem === subsystem && item.parent)
+  );
+  const childItem = (subsystem, label) => itemById[`${subsystem}-${toHealthItemId(label)}`];
+  const chassisGroup = VEHICLE_HEALTH_GROUPS.find((group) => group.subsystem === "chassis");
+  const sensorsGroup = VEHICLE_HEALTH_GROUPS.find((group) => group.subsystem === "sensors");
+  const chassisItems = [
+    parentItem("chassis"),
+    ...(chassisGroup?.children ?? []).map((label) => childItem("chassis", label)),
+  ].filter(Boolean);
+  const sensorItems = [
+    parentItem("sensors"),
+    ...(sensorsGroup?.children ?? []).map((label) => childItem("sensors", label)),
+  ].filter(Boolean);
+  const powerItems = ["engine", "battery", "hydraulics"].map(parentItem).filter(Boolean);
+
+  addPdfmeBox(page1, input, "p1_header_bg", 0, 0, PDFME_PAGE_WIDTH_MM, 43, "#0f172a");
+  addPdfmeText(page1, input, "p1_brand", "LANDFORGE", 14, 11, 52, 6, {
+    fontSize: 7,
+    fontColor: "#93c5fd",
+    backgroundColor: "#0f172a",
+  });
+  addPdfmeText(page1, input, "p1_title", "Executive Mission Report", 14, 19, 115, 12, {
+    fontSize: 18,
+    fontColor: "#f8fafc",
+    backgroundColor: "#0f172a",
+  });
+  addPdfmeText(page1, input, "p1_subtitle", `${report.theaterLabel} | ${model.unitLabel} | ${model.materialName}`, 14, 33, 140, 6, {
+    fontSize: 7,
+    fontColor: "#cbd5e1",
+    backgroundColor: "#0f172a",
+  });
+  addPdfmeText(page1, input, "p1_status", model.status, 158, 15, 38, 12, {
+    fontSize: 8.5,
+    fontColor: "#ffffff",
+    backgroundColor: riskColor,
+    alignment: "center",
+    verticalAlignment: "middle",
+    dynamicFontSize: { min: 6, max: 8.5, fit: "vertical" },
+  });
+
+  const metricWidth = 42;
+  addPdfmeMetric(page1, input, "p1_metric_overall", 14, 52, metricWidth, "Overall", formatHealthPercent(model.finalHealth), riskColor);
+  addPdfmeMetric(page1, input, "p1_metric_risk", 60, 52, metricWidth, "Risk", model.riskLevel, riskColor);
+  addPdfmeMetric(page1, input, "p1_metric_cost", 106, 52, metricWidth, "Cost", costModel.formattedTotal, "#2563eb");
+  addPdfmeMetric(page1, input, "p1_metric_time", 152, 52, metricWidth, "Exposure", model.durationLabel, "#0f766e");
+
+  addPdfmeSectionLabel(page1, input, "p1_decision_label", "Command Decision", 14, 88, 70);
+  addPdfmeBox(page1, input, "p1_decision_box", 14, 99, 182, 43, "#f8fafc");
+  addPdfmeText(page1, input, "p1_decision", model.recommendation, 21, 107, 168, 14, {
+    fontSize: 10,
+    fontColor: "#0f172a",
+    backgroundColor: "#f8fafc",
+    dynamicFontSize: { min: 7, max: 10, fit: "vertical" },
+  });
+  addPdfmeText(page1, input, "p1_summary", wrapPdfmeText(model.summary, 92, 3), 21, 124, 168, 13, {
+    fontSize: 7,
+    fontColor: "#475569",
+    backgroundColor: "#f8fafc",
+    lineHeight: 1.25,
+  });
+
+  addPdfmeSectionLabel(page1, input, "p1_top_risks_label", "Top Operational Risks", 14, 154, 82);
+  model.topRisks.forEach((risk, index) => {
+    const x = 14 + index * 61;
+    const riskStatus = risk.failedDay === null
+      ? `${formatHealthPercent(risk.health)} final`
+      : `Failed day ${risk.failedDay}`;
+    addPdfmeBox(page1, input, `p1_risk_${index}_box`, x, 165, 55, 46, "#ffffff");
+    addPdfmeBox(page1, input, `p1_risk_${index}_accent`, x, 165, 2.5, 46, risk.failedDay === null ? pdfHealthHex(risk.health) : "#991b1b");
+    addPdfmeText(page1, input, `p1_risk_${index}_title`, risk.label, x + 6, 171, 45, 7, {
+      fontSize: 8,
+      fontColor: "#0f172a",
+      backgroundColor: "#ffffff",
+    });
+    addPdfmeText(page1, input, `p1_risk_${index}_status`, riskStatus, x + 6, 181, 45, 6, {
+      fontSize: 6.5,
+      fontColor: risk.failedDay === null ? "#475569" : "#991b1b",
+      backgroundColor: "#ffffff",
+    });
+    addPdfmeText(page1, input, `p1_risk_${index}_why`, wrapPdfmeText(risk.reason, 34, 3), x + 6, 191, 45, 15, {
+      fontSize: 5.8,
+      fontColor: "#64748b",
+      backgroundColor: "#ffffff",
+      lineHeight: 1.25,
+    });
+  });
+
+  addPdfmeSectionLabel(page1, input, "p1_actions_label", "Recommended Actions", 14, 225, 82);
+  model.actions.forEach((action, index) => {
+    const y = 237 + index * 12;
+    addPdfmeText(page1, input, `p1_action_${index}_num`, String(index + 1), 15, y, 7, 7, {
+      fontSize: 6,
+      fontColor: "#ffffff",
+      backgroundColor: riskColor,
+      alignment: "center",
+      verticalAlignment: "middle",
+    });
+    addPdfmeText(page1, input, `p1_action_${index}`, wrapPdfmeText(action, 92, 2), 26, y - 1, 165, 10, {
+      fontSize: 6.4,
+      fontColor: "#334155",
+      backgroundColor: "#ffffff",
+      lineHeight: 1.2,
+    });
+  });
+  addPdfmeText(page1, input, "p1_footer", `Page 1 of ${totalPages} | Evidence basis: ${RESEARCH_SOURCE_NOTE}; simulation engine environmental model.`, 14, 286, 180, 5, {
+    fontSize: 5.2,
+    fontColor: "#64748b",
+    backgroundColor: "#ffffff",
+  });
+
+  addPdfmeText(page2, input, "p2_brand", "LANDFORGE", 14, 12, 52, 6, {
+    fontSize: 7,
+    fontColor: "#1d4ed8",
+    backgroundColor: "#ffffff",
+  });
+  addPdfmeText(page2, input, "p2_title", "Risk Register", 14, 22, 100, 10, {
+    fontSize: 17,
+    fontColor: "#0f172a",
+    backgroundColor: "#ffffff",
+  });
+  addPdfmeText(page2, input, "p2_subtitle", "High-level operational view. Engineering equations are intentionally excluded from this report.", 14, 36, 150, 7, {
+    fontSize: 6.5,
+    fontColor: "#475569",
+    backgroundColor: "#ffffff",
+  });
+  addPdfmeText(page2, input, "p2_status", `${model.riskLevel} Risk`, 160, 21, 36, 10, {
+    fontSize: 8,
+    fontColor: "#ffffff",
+    backgroundColor: riskColor,
+    alignment: "center",
+    verticalAlignment: "middle",
+  });
+
+  ["Subsystem", "Readiness", "Operational Meaning", "Action"].forEach((label, index) => {
+    const x = [14, 52, 86, 145][index];
+    const width = [34, 30, 55, 51][index];
+    addPdfmeText(page2, input, `p2_table_head_${index}`, label.toUpperCase(), x, 55, width, 6, {
+      fontSize: 5.6,
+      fontColor: "#64748b",
+      backgroundColor: "#e2e8f0",
+    });
+  });
+  model.parentRisks.forEach((risk, index) => {
+    const y = 66 + index * 24;
+    const readiness = risk.failedDay === null
+      ? `${formatHealthPercent(risk.health)} final`
+      : `Failed day ${risk.failedDay}`;
+    const meaning = risk.failedDay === null
+      ? `${risk.label} remains available but is a watch item if exposure increases.`
+      : `${risk.label} becomes mission-limiting during the simulated window.`;
+    const action = risk.failedDay === null
+      ? `Inspect ${risk.label.toLowerCase()} at normal interval.`
+      : `Replace or isolate ${risk.label.toLowerCase()} before launch.`;
+    const fill = index % 2 === 0 ? "#ffffff" : "#f8fafc";
+    addPdfmeBox(page2, input, `p2_row_${index}_bg`, 14, y - 3, 182, 20, fill);
+    addPdfmeText(page2, input, `p2_row_${index}_name`, risk.label, 16, y + 1, 32, 7, {
+      fontSize: 6.8,
+      fontColor: "#0f172a",
+      backgroundColor: fill,
+    });
+    addPdfmeText(page2, input, `p2_row_${index}_ready`, readiness, 52, y + 1, 30, 7, {
+      fontSize: 6.2,
+      fontColor: risk.failedDay === null ? pdfHealthHex(risk.health) : "#991b1b",
+      backgroundColor: fill,
+    });
+    addPdfmeText(page2, input, `p2_row_${index}_meaning`, wrapPdfmeText(meaning, 38, 2), 86, y, 55, 10, {
+      fontSize: 5.6,
+      fontColor: "#475569",
+      backgroundColor: fill,
+      lineHeight: 1.15,
+    });
+    addPdfmeText(page2, input, `p2_row_${index}_action`, wrapPdfmeText(action, 36, 2), 145, y, 48, 10, {
+      fontSize: 5.6,
+      fontColor: "#334155",
+      backgroundColor: fill,
+      lineHeight: 1.15,
+    });
+  });
+
+  addPdfmeSectionLabel(page2, input, "p2_drivers_label", "Environmental Drivers", 14, 198, 82);
+  addPdfmeBox(page2, input, "p2_drivers_box", 14, 209, 182, 34, "#f8fafc");
+  addPdfmeText(page2, input, "p2_inputs", `Inputs: ${Math.round(report.inputs?.temperatureF ?? 0)} F, ${Number(report.inputs?.dustMgM3 ?? 0).toFixed(1)} mg/m3 dust, ${Math.round(report.inputs?.relativeHumidityPct ?? 0)}% humidity, ${Number(report.inputs?.salinityPct ?? 0).toFixed(1)}% salinity, ${Math.round(report.inputs?.uvWm2 ?? 0)} W/m2 UV.`, 21, 216, 168, 7, {
+    fontSize: 6.2,
+    fontColor: "#0f172a",
+    backgroundColor: "#f8fafc",
+  });
+  addPdfmeText(page2, input, "p2_drivers", wrapPdfmeText(model.activeDrivers.map((driver) => driver.description).join(" | "), 108, 3), 21, 228, 168, 12, {
+    fontSize: 5.8,
+    fontColor: "#475569",
+    backgroundColor: "#f8fafc",
+    lineHeight: 1.18,
+  });
+
+  addPdfmeSectionLabel(page2, input, "p2_scope_label", "Model Scope", 14, 257, 82);
+  addPdfmeText(page2, input, "p2_scope", wrapPdfmeText("This executive report summarizes readiness, risk, and actions. It intentionally omits equations and raw coefficient tables. The detailed simulator still tracks engine, battery, hydraulics, chassis, and sensors; chassis and sensor subcomponents inherit their parent state.", 112, 4), 14, 268, 182, 16, {
+    fontSize: 5.8,
+    fontColor: "#475569",
+    backgroundColor: "#ffffff",
+    lineHeight: 1.15,
+  });
+  addPdfmeReportFooter(page2, input, "p2", 2, totalPages);
+
+  addPdfmeReportHeader(
+    page3,
+    input,
+    "p3",
+    "Subsystem Readiness Detail",
+    "Long-form operational readout for each modeled subsystem.",
+    3,
+    totalPages,
+    riskColor,
+  );
+  ["Subsystem", "Readiness", "Meaning", "Action"].forEach((label, index) => {
+    const x = [14, 48, 81, 145][index];
+    const width = [30, 29, 60, 51][index];
+    addPdfmeText(page3, input, `p3_head_${index}`, label.toUpperCase(), x, 57, width, 6, {
+      fontSize: 5.6,
+      fontColor: "#64748b",
+      backgroundColor: "#e2e8f0",
+    });
+  });
+  model.parentRisks.forEach((risk, index) => {
+    const y = 68 + index * 39;
+    const fill = index % 2 === 0 ? "#ffffff" : "#f8fafc";
+    const readiness = risk.failedDay === null
+      ? `${formatHealthPercent(risk.health)} final`
+      : `Failed day ${risk.failedDay}`;
+    addPdfmeBox(page3, input, `p3_row_${index}_bg`, 14, y - 4, 182, 33, fill);
+    addPdfmeBox(page3, input, `p3_row_${index}_accent`, 14, y - 4, 2.5, 33, risk.failedDay === null ? pdfHealthHex(risk.health) : "#991b1b");
+    addPdfmeText(page3, input, `p3_row_${index}_subsystem`, risk.label, 18, y + 2, 26, 7, {
+      fontSize: 6.8,
+      fontColor: "#0f172a",
+      backgroundColor: fill,
+    });
+    addPdfmeText(page3, input, `p3_row_${index}_importance`, risk.importance.label, 18, y + 13, 26, 6, {
+      fontSize: 5.4,
+      fontColor: "#64748b",
+      backgroundColor: fill,
+    });
+    addPdfmeText(page3, input, `p3_row_${index}_ready`, readiness, 48, y + 2, 28, 8, {
+      fontSize: 6.2,
+      fontColor: risk.failedDay === null ? pdfHealthHex(risk.health) : "#991b1b",
+      backgroundColor: fill,
+    });
+    addPdfmeText(page3, input, `p3_row_${index}_reason`, wrapPdfmeText(risk.reason, 28, 2), 48, y + 13, 28, 11, {
+      fontSize: 4.8,
+      fontColor: "#64748b",
+      backgroundColor: fill,
+      lineHeight: 1.15,
+    });
+    addPdfmeText(page3, input, `p3_row_${index}_meaning`, wrapPdfmeText(operationalMeaningForRisk(risk), 42, 3), 81, y, 58, 21, {
+      fontSize: 5.5,
+      fontColor: "#475569",
+      backgroundColor: fill,
+      lineHeight: 1.15,
+    });
+    addPdfmeText(page3, input, `p3_row_${index}_action`, wrapPdfmeText(actionForRisk(risk), 36, 3), 145, y, 48, 21, {
+      fontSize: 5.5,
+      fontColor: "#334155",
+      backgroundColor: fill,
+      lineHeight: 1.15,
+    });
+  });
+  addPdfmeInfoCard(
+    page3,
+    input,
+    "p3_watchlist",
+    14,
+    266,
+    182,
+    16,
+    "Operator interpretation",
+    wrapPdfmeText("Use the failed-day column as the no-go gate. If no subsystem fails, use the lowest final readiness score as the inspection priority before the next deployment cycle.", 112, 2),
+    riskColor,
+    { bodySize: 5.4 },
+  );
+  addPdfmeReportFooter(page3, input, "p3", 3, totalPages);
+
+  addPdfmeReportHeader(
+    page4,
+    input,
+    "p4",
+    "Environmental Driver Assessment",
+    "Inputs, active thresholds, and mitigation focus for the simulated theater.",
+    4,
+    totalPages,
+    riskColor,
+  );
+  [
+    ["Temperature", `${Math.round(report.inputs?.temperatureF ?? 0)} F`, "#60a5fa"],
+    ["Dust", `${Number(report.inputs?.dustMgM3 ?? 0).toFixed(1)} mg/m3`, "#f59e0b"],
+    ["Humidity", `${Math.round(report.inputs?.relativeHumidityPct ?? 0)}%`, "#22c55e"],
+    ["Salinity", `${Number(report.inputs?.salinityPct ?? 0).toFixed(1)}%`, "#38bdf8"],
+    ["UV", `${Math.round(report.inputs?.uvWm2 ?? 0)} W/m2`, "#eab308"],
+    ["Material", model.materialName, "#64748b"],
+  ].forEach(([label, value, color], index) => {
+    const col = index % 3;
+    const row = Math.floor(index / 3);
+    addPdfmeInfoCard(page4, input, `p4_input_${index}`, 14 + col * 61, 58 + row * 30, 56, 23, label, value, color, {
+      bodySize: 7.8,
+      titleSize: 5.2,
+      dynamicFontSize: { min: 5.8, max: 7.8, fit: "vertical" },
+    });
+  });
+  addPdfmeSectionLabel(page4, input, "p4_driver_label", "Driver Thresholds", 14, 124, 88);
+  ENVIRONMENT_FAILURE_FACTORS.forEach((factor, index) => {
+    const active = factor.isActive(report.inputs ?? {});
+    const y = 136 + index * 21;
+    const fill = active ? "#f8fafc" : "#ffffff";
+    const color = active ? riskColor : "#94a3b8";
+    addPdfmeBox(page4, input, `p4_driver_${index}_bg`, 14, y - 3, 182, 17, fill);
+    addPdfmeBox(page4, input, `p4_driver_${index}_accent`, 14, y - 3, 2.5, 17, color);
+    addPdfmeText(page4, input, `p4_driver_${index}_state`, active ? "ACTIVE" : "WATCH", 20, y + 1, 22, 6, {
+      fontSize: 5.4,
+      fontColor: color,
+      backgroundColor: fill,
+    });
+    addPdfmeText(page4, input, `p4_driver_${index}_label`, factor.label, 45, y + 1, 38, 6, {
+      fontSize: 6.2,
+      fontColor: "#0f172a",
+      backgroundColor: fill,
+    });
+    addPdfmeText(page4, input, `p4_driver_${index}_desc`, wrapPdfmeText(factor.describe(report.inputs ?? {}), 72, 2), 86, y - 1, 106, 10, {
+      fontSize: 5.2,
+      fontColor: "#475569",
+      backgroundColor: fill,
+      lineHeight: 1.15,
+    });
+  });
+  addPdfmeReportFooter(page4, input, "p4", 4, totalPages);
+
+  addPdfmeReportHeader(
+    page5,
+    input,
+    "p5",
+    "Component Trend Index",
+    "Start, final, minimum, and failure state for every displayed component.",
+    5,
+    totalPages,
+    riskColor,
+  );
+  componentItems.forEach((item, index) => {
+    const col = Math.floor(index / 8);
+    const row = index % 8;
+    const x = 14 + col * 94;
+    const y = 60 + row * 26;
+    const width = 88;
+    const stats = pdfmeTrendStats(report, item);
+    const failedText = stats.failedDay === null ? "No failure" : `Failed day ${stats.failedDay}`;
+    const fill = row % 2 === 0 ? "#ffffff" : "#f8fafc";
+    addPdfmeBox(page5, input, `p5_item_${index}_bg`, x, y, width, 22, fill);
+    addPdfmeBox(page5, input, `p5_item_${index}_accent`, x, y, 2.4, 22, stats.failedDay === null ? pdfHealthHex(stats.final) : "#991b1b");
+    addPdfmeText(page5, input, `p5_item_${index}_name`, item.label, x + 6, y + 4, width - 10, 5.6, {
+      fontSize: 6.3,
+      fontColor: "#0f172a",
+      backgroundColor: fill,
+    });
+    addPdfmeText(page5, input, `p5_item_${index}_readiness`, `${formatHealthPercent(stats.start)} to ${formatHealthPercent(stats.final)} (${formatPdfmePointDelta(stats.delta)})`, x + 6, y + 12, width - 10, 4.8, {
+      fontSize: 5.1,
+      fontColor: "#475569",
+      backgroundColor: fill,
+    });
+    addPdfmeText(page5, input, `p5_item_${index}_min`, `Min ${formatHealthPercent(stats.min)} | ${failedText} | ${item.parent ? "tracked" : `inherits ${item.parentLabel}`}`, x + 6, y + 17, width - 10, 4.8, {
+      fontSize: 4.7,
+      fontColor: stats.failedDay === null ? "#64748b" : "#991b1b",
+      backgroundColor: fill,
+    });
+  });
+  addPdfmeReportFooter(page5, input, "p5", 5, totalPages);
+
+  addPdfmeReportHeader(
+    page6,
+    input,
+    "p6",
+    "Chassis And Sensor Breakdown",
+    "Detailed operator view for the grouped structural and sensing components.",
+    6,
+    totalPages,
+    riskColor,
+  );
+  [
+    ["Chassis Components", chassisItems, 14, physicsBySubsystem.chassis],
+    ["Sensor Components", sensorItems, 108, physicsBySubsystem.sensors],
+  ].forEach(([title, items, x, physicsCard]) => {
+    addPdfmeSectionLabel(page6, input, `p6_${title}_label`, title, x, 58, 72);
+    items.forEach((item, index) => {
+      const y = 72 + index * 22;
+      const stats = pdfmeTrendStats(report, item);
+      const fill = index % 2 === 0 ? "#ffffff" : "#f8fafc";
+      addPdfmeBox(page6, input, `p6_${item.id}_box`, x, y, 88, 18, fill);
+      addPdfmeBox(page6, input, `p6_${item.id}_accent`, x, y, 2.3, 18, stats.failedDay === null ? pdfHealthHex(stats.final) : "#991b1b");
+      addPdfmeText(page6, input, `p6_${item.id}_name`, item.label, x + 5, y + 3, 34, 5, {
+        fontSize: 5.8,
+        fontColor: "#0f172a",
+        backgroundColor: fill,
+      });
+      addPdfmeText(page6, input, `p6_${item.id}_state`, `${formatHealthPercent(stats.final)} final`, x + 42, y + 3, 42, 5, {
+        fontSize: 5.5,
+        fontColor: pdfHealthHex(stats.final),
+        backgroundColor: fill,
+      });
+      addPdfmeText(page6, input, `p6_${item.id}_note`, item.parent ? "Tracked parent state" : `Uses ${physicsCard.label.toLowerCase()} parent state`, x + 5, y + 10, 78, 5, {
+        fontSize: 4.8,
+        fontColor: "#64748b",
+        backgroundColor: fill,
+      });
+    });
+  });
+  addPdfmeInfoCard(
+    page6,
+    input,
+    "p6_scope",
+    14,
+    236,
+    182,
+    34,
+    "Grouped-state caveat",
+    wrapPdfmeText("The simulation engine tracks one chassis state and one sensor state. The report expands those parent states into operator-facing items so maintainers can assign inspections to frame, plating, optics, radar, GPS, camera, and related assemblies.", 110, 4),
+    riskColor,
+    { bodySize: 5.5 },
+  );
+  addPdfmeReportFooter(page6, input, "p6", 6, totalPages);
+
+  addPdfmeReportHeader(
+    page7,
+    input,
+    "p7",
+    "Power And Mobility Detail",
+    "Long-form notes for engine, battery, hydraulics, and vehicle weighting.",
+    7,
+    totalPages,
+    riskColor,
+  );
+  powerItems.forEach((item, index) => {
+    const card = physicsBySubsystem[item.subsystem];
+    const stats = pdfmeTrendStats(report, item);
+    const activeTerms = card.terms.filter((term) => Math.abs(term.raw) > 0);
+    const stressorText = (activeTerms.length ? activeTerms : card.terms)
+      .slice(0, 3)
+      .map((term) => `${term.label}: ${term.why}`)
+      .join(" | ");
+    addPdfmeInfoCard(
+      page7,
+      input,
+      `p7_power_${index}`,
+      14,
+      62 + index * 58,
+      182,
+      50,
+      `${item.label} - ${formatHealthPercent(stats.final)} final`,
+      wrapPdfmeText(`${stats.failedDay === null ? "No modeled failure." : `Fails on day ${stats.failedDay}.`} ${card.why} Primary stressors: ${stressorText}`, 112, 5),
+      stats.failedDay === null ? pdfHealthHex(stats.final) : "#991b1b",
+      { bodySize: 5.5, lineHeight: 1.18 },
+    );
+  });
+  addPdfmeInfoCard(
+    page7,
+    input,
+    "p7_weighting",
+    14,
+    242,
+    182,
+    28,
+    "Vehicle-level weighting",
+    wrapPdfmeText("Overall health weights engine highest, then battery and hydraulics, then chassis and sensors. This makes propulsion and power losses dominate the readiness score while still surfacing structural and sensing risk.", 112, 3),
+    "#2563eb",
+    { bodySize: 5.5 },
+  );
+  addPdfmeReportFooter(page7, input, "p7", 7, totalPages);
+
+  addPdfmeReportHeader(
+    page8,
+    input,
+    "p8",
+    "Deployment Checklist",
+    "Actions, assumptions, and follow-up items for the post-report workflow.",
+    8,
+    totalPages,
+    riskColor,
+  );
+  addPdfmeInfoCard(
+    page8,
+    input,
+    "p8_decision",
+    14,
+    58,
+    182,
+    30,
+    model.status,
+    wrapPdfmeText(`${model.recommendation} ${model.summary}`, 112, 3),
+    riskColor,
+    { bodySize: 5.8 },
+  );
+  model.actions.forEach((action, index) => {
+    const y = 104 + index * 28;
+    addPdfmeBox(page8, input, `p8_action_${index}_bg`, 14, y, 182, 22, index % 2 === 0 ? "#ffffff" : "#f8fafc");
+    addPdfmeText(page8, input, `p8_action_${index}_num`, String(index + 1), 19, y + 6, 8, 8, {
+      fontSize: 6,
+      fontColor: "#ffffff",
+      backgroundColor: riskColor,
+      alignment: "center",
+      verticalAlignment: "middle",
+    });
+    addPdfmeText(page8, input, `p8_action_${index}_text`, wrapPdfmeText(action, 96, 2), 33, y + 5, 154, 10, {
+      fontSize: 5.8,
+      fontColor: "#334155",
+      backgroundColor: index % 2 === 0 ? "#ffffff" : "#f8fafc",
+      lineHeight: 1.2,
+    });
+  });
+  addPdfmeInfoCard(
+    page8,
+    input,
+    "p8_assumptions",
+    14,
+    224,
+    88,
+    44,
+    "Assumptions",
+    wrapPdfmeText(`The report uses ${model.materialName}, ${model.durationLabel}, ${model.unitLabel}, and the captured environmental inputs. Re-run if any of those change.`, 48, 5),
+    "#0f766e",
+    { bodySize: 5.2 },
+  );
+  addPdfmeInfoCard(
+    page8,
+    input,
+    "p8_followup",
+    108,
+    224,
+    88,
+    44,
+    "Follow-up",
+    wrapPdfmeText("Archive this PDF with the mission package, assign owner names to each action, and compare the next run against this baseline after repairs or theater changes.", 48, 5),
+    "#2563eb",
+    { bodySize: 5.2 },
+  );
+  addPdfmeReportFooter(page8, input, "p8", 8, totalPages);
+
+  addPdfmeReportHeader(
+    page9,
+    input,
+    "p9",
+    "Cost Exposure Estimate",
+    `${costModel.profileLabel}; all ${costModel.datasetRowsUsed} dataset component rows are included.`,
+    9,
+    totalPages,
+    riskColor,
+  );
+  [
+    ["Estimated total", costModel.formattedTotal, riskColor],
+    ["Replacement exposure", formatCostUsd(costModel.replacementExposure), "#991b1b"],
+    ["Preventive exposure", formatCostUsd(costModel.preventiveExposure), "#0f766e"],
+  ].forEach(([label, value, color], index) => {
+    addPdfmeInfoCard(page9, input, `p9_metric_${index}`, 14 + index * 61, 58, 56, 28, label, value, color, {
+      bodySize: 8.2,
+      titleSize: 5.2,
+      dynamicFontSize: { min: 5.8, max: 8.2, fit: "vertical" },
+    });
+  });
+  addPdfmeSectionLabel(page9, input, "p9_table_label", "Cost Drivers", 14, 102, 72);
+  ["Component", "Readiness", "Status", "Estimate", "Reason"].forEach((label, index) => {
+    const x = [14, 52, 79, 116, 145][index];
+    const width = [34, 23, 33, 25, 51][index];
+    addPdfmeText(page9, input, `p9_head_${index}`, label.toUpperCase(), x, 114, width, 6, {
+      fontSize: 5.4,
+      fontColor: "#64748b",
+      backgroundColor: "#e2e8f0",
+    });
+  });
+  costModel.rows.forEach((row, index) => {
+    const y = 124 + index * 9.25;
+    const fill = index % 2 === 0 ? "#ffffff" : "#f8fafc";
+    const rowColor = row.failedDay === null ? pdfHealthHex(row.finalHealth) : "#991b1b";
+    addPdfmeBox(page9, input, `p9_row_${index}_bg`, 14, y - 2, 182, 7.8, fill);
+    addPdfmeBox(page9, input, `p9_row_${index}_accent`, 14, y - 2, 1.8, 7.8, rowColor);
+    addPdfmeText(page9, input, `p9_row_${index}_component`, row.label, 17, y, 31, 4.5, {
+      fontSize: 4.7,
+      fontColor: "#0f172a",
+      backgroundColor: fill,
+    });
+    addPdfmeText(page9, input, `p9_row_${index}_readiness`, formatHealthPercent(row.finalHealth), 52, y, 22, 4.5, {
+      fontSize: 4.7,
+      fontColor: rowColor,
+      backgroundColor: fill,
+    });
+    addPdfmeText(page9, input, `p9_row_${index}_status`, row.status, 79, y, 32, 4.5, {
+      fontSize: 4.5,
+      fontColor: "#334155",
+      backgroundColor: fill,
+    });
+    addPdfmeText(page9, input, `p9_row_${index}_cost`, formatCostUsd(row.estimatedCost), 116, y, 25, 4.5, {
+      fontSize: 4.8,
+      fontColor: "#0f172a",
+      backgroundColor: fill,
+    });
+    addPdfmeText(page9, input, `p9_row_${index}_reason`, wrapPdfmeText(row.reason, 43, 1), 145, y, 48, 4.5, {
+      fontSize: 4.1,
+      fontColor: "#64748b",
+      backgroundColor: fill,
+    });
+  });
+  addPdfmeInfoCard(
+    page9,
+    input,
+    "p9_note",
+    14,
+    258,
+    182,
+    22,
+    "Cost basis",
+    wrapPdfmeText(costModel.sourceNote, 112, 2),
+    "#64748b",
+    { bodySize: 5.1 },
+  );
+  addPdfmeReportFooter(page9, input, "p9", 9, totalPages);
+
+  const template = {
+    basePdf: { width: PDFME_PAGE_WIDTH_MM, height: PDFME_PAGE_HEIGHT_MM, padding: [0, 0, 0, 0] },
+    schemas: [page1, page2, page3, page4, page5, page6, page7, page8, page9],
+  };
+
+  return generate({
+    template,
+    inputs: [input],
+  });
+};
+
+const pdfHealthHex = (value) => {
+  const [r, g, b] = hslToRgb(healthHue(value), 0.84, 0.42);
+  const toHex = (channel) => Math.round(channel * 255).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+};
+
+const buildReportPdf = async (report) => {
+  try {
+    return await buildExecutiveReportPdf(report);
+  } catch (error) {
+    console.error("Unable to generate executive pdfme report", error);
+    return buildDetailedReportPdf(report);
+  }
+};
+
+const downloadReportPdf = async (report) => {
+  const blob = new Blob([await buildReportPdf(report)], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -1916,11 +3032,75 @@ function ReportSection({ section, series }) {
   );
 }
 
+function ExecutiveSummarySection({ model }) {
+  return (
+    <section
+      className="report-exec-summary"
+      style={{ "--exec-risk-color": executiveRiskColor(model.riskLevel) }}
+      aria-label="Executive summary"
+    >
+      <div className="report-exec-summary__head">
+        <span>Executive Summary</span>
+        <strong>{model.riskLevel} Risk</strong>
+      </div>
+      <div className="report-exec-summary__body">
+        <div className="report-exec-summary__decision">
+          <span>{model.status}</span>
+          <p>{model.recommendation}</p>
+        </div>
+        <p className="report-exec-summary__readout">{model.summary}</p>
+        <div className="report-exec-summary__actions">
+          {model.actions.map((action, index) => (
+            <div className="report-exec-summary__action" key={action}>
+              <span>{index + 1}</span>
+              <p>{action}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CostSummarySection({ model }) {
+  return (
+    <section className="report-cost-summary" aria-label="Cost estimate">
+      <div className="report-cost-summary__head">
+        <span>Cost Estimate</span>
+        <strong>{model.formattedTotal}</strong>
+      </div>
+      <div className="report-cost-summary__source">
+        {model.profileLabel} · {model.datasetRowsUsed} dataset rows
+      </div>
+      <div className="report-cost-summary__grid">
+        <div className="report-cost-summary__metric">
+          <span>Replacement Exposure</span>
+          <strong>{formatCostUsd(model.replacementExposure)}</strong>
+        </div>
+        <div className="report-cost-summary__metric">
+          <span>Preventive Exposure</span>
+          <strong>{formatCostUsd(model.preventiveExposure)}</strong>
+        </div>
+        <div className="report-cost-summary__drivers">
+          {model.topCostDrivers.map((driver) => (
+            <div className="report-cost-summary__driver" key={driver.label}>
+              <span>{driver.label}</span>
+              <strong>{formatCostUsd(driver.estimatedCost)}</strong>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function SimulationReportPanel({ report, onClose }) {
   const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
   const finalHealth = clampHealthUnit(finalSnapshot.vehicle_health ?? 1);
   const failures = buildFailureSummary(report.series, report.inputs, report.durationDays);
   const reportStatusTitle = missionStatusLabel(failures.length);
+  const executiveModel = buildExecutiveReportModel(report);
+  const costModel = buildCostReportModel(report, executiveModel);
 
   return (
     <aside className="report-panel" aria-label="Simulation report">
@@ -1942,7 +3122,7 @@ function SimulationReportPanel({ report, onClose }) {
           <button
             type="button"
             className="report-panel__download"
-            onClick={() => downloadReportPdf(report)}
+            onClick={() => void downloadReportPdf(report)}
             aria-label="Download simulation report PDF"
             title="Download PDF"
           >
@@ -1971,6 +3151,8 @@ function SimulationReportPanel({ report, onClose }) {
       </div>
 
       <div className="report-panel__sections">
+        <ExecutiveSummarySection model={executiveModel} />
+        <CostSummarySection model={costModel} />
         <FailureSummarySection failures={failures} />
         <ComponentTrendCard item={REPORT_HEALTH_ITEMS[0]} series={report.series} />
         {REPORT_HEALTH_SECTIONS.map((section) => (
@@ -2441,6 +3623,7 @@ export function TheaterWorkbench() {
         setSimulationReport({
           theaterLabel: theater.label,
           unitLabel,
+          vehicleId,
           durationDays: simulationDurationDays,
           material: runInputs.material,
           inputs: runInputs,
