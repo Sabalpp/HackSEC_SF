@@ -76,6 +76,16 @@ const MATERIALS = {
     roughness: 0.98,
     metalness: 0,
   }),
+  spinyShrubStem: new THREE.MeshStandardMaterial({
+    color: 0x5c543f,
+    roughness: 0.96,
+    metalness: 0,
+  }),
+  spinyShrubCrown: new THREE.MeshStandardMaterial({
+    color: 0x6f7b58,
+    roughness: 0.98,
+    metalness: 0,
+  }),
 };
 
 export function createIranMaranjabDuneFieldsScene(container = document.body, options = {}) {
@@ -121,6 +131,7 @@ export function createIranMaranjabDuneFieldsScene(container = document.body, opt
   addDuneCrestLines(scene);
   addRockOutcrops(scene);
   addSparseDesertShrubs(scene);
+  addRegionalSpinyDesertPlants(scene);
   addFogBoundaryPlane(scene);
   addScaleReference(scene);
   applyRadialFogToScene(scene);
@@ -747,6 +758,115 @@ function addSparseDesertShrubs(scene) {
   shrubs.receiveShadow = true;
   matrices.forEach((matrix, index) => shrubs.setMatrixAt(index, matrix));
   scene.add(shrubs);
+}
+
+function addRegionalSpinyDesertPlants(scene) {
+  const random = mulberry32(SEED + 1717);
+  const stemGeometry = new THREE.CylinderGeometry(1, 1, 1, 5);
+  const crownGeometry = new THREE.SphereGeometry(1, 9, 6);
+  const branchGeometry = new THREE.CylinderGeometry(1, 1, 1, 4);
+  const stemMatrices = [];
+  const crownMatrices = [];
+  const branchMatrices = [];
+  const selected = [];
+  const dummy = new THREE.Object3D();
+  const targetCount = 32;
+  let attempts = 0;
+
+  while (crownMatrices.length < targetCount && attempts < targetCount * 42) {
+    attempts += 1;
+
+    const x = randomRange(random, -HALF_TERRAIN + 42, HALF_TERRAIN - 42);
+    const z = randomRange(random, -HALF_TERRAIN + 42, HALF_TERRAIN - 42);
+    const slope = terrainSlopeAt(x, z);
+    const floorQuality = interduneFloorQualityAt(x, z);
+    const washQuality = dryWashFloorScoreAt(x, z);
+    const survivalNoise = fbm(x * 0.014 - 12, z * 0.014 + 27, 4);
+
+    if (slope > 0.13) continue;
+    if (floorQuality < 0.26 && washQuality < 0.3) continue;
+    if (survivalNoise < 0.5) continue;
+    if (selected.some((position) => Math.hypot(position.x - x, position.z - z) < 42)) continue;
+
+    const ground = renderHeightMetersAt(x, z);
+    const yaw = randomRange(random, 0, Math.PI * 2);
+    const stemHeight = randomRange(random, 0.7, 1.65);
+    const stemRadius = randomRange(random, 0.055, 0.115);
+    const crownRadiusX = randomRange(random, 0.9, 1.8);
+    const crownRadiusY = randomRange(random, 0.5, 1.05);
+    const crownRadiusZ = randomRange(random, 0.8, 1.65);
+
+    setMatrix(
+      dummy,
+      x,
+      ground + stemHeight / 2,
+      z,
+      yaw,
+      randomRange(random, -0.08, 0.08),
+      randomRange(random, -0.08, 0.08),
+      stemRadius,
+      stemHeight,
+      stemRadius,
+    );
+    stemMatrices.push(dummy.matrix.clone());
+
+    setMatrix(
+      dummy,
+      x,
+      ground + stemHeight + crownRadiusY * 0.45,
+      z,
+      yaw,
+      randomRange(random, -0.05, 0.05),
+      randomRange(random, -0.05, 0.05),
+      crownRadiusX,
+      crownRadiusY,
+      crownRadiusZ,
+    );
+    crownMatrices.push(dummy.matrix.clone());
+
+    const branchCount = 3 + Math.floor(random() * 4);
+    for (let branch = 0; branch < branchCount; branch += 1) {
+      const branchYaw = yaw + randomRange(random, -1.25, 1.25) + (branch / branchCount) * Math.PI * 2;
+      const baseY = ground + randomRange(random, stemHeight * 0.35, stemHeight + crownRadiusY * 0.35);
+      const length = randomRange(random, 0.6, 1.65);
+      const radius = randomRange(random, 0.018, 0.04);
+      const lift = randomRange(random, 0.42, 0.78);
+
+      setBranchMatrix(dummy, x, baseY, z, branchYaw, lift, length, radius);
+      branchMatrices.push(dummy.matrix.clone());
+    }
+
+    selected.push({ x, z });
+  }
+
+  const stems = new THREE.InstancedMesh(stemGeometry, MATERIALS.spinyShrubStem, stemMatrices.length);
+  stems.name = "regional tagh and camelthorn woody stems";
+  stems.castShadow = true;
+  stems.receiveShadow = true;
+  stemMatrices.forEach((matrix, index) => stems.setMatrixAt(index, matrix));
+  scene.add(stems);
+
+  const crowns = new THREE.InstancedMesh(crownGeometry, MATERIALS.spinyShrubCrown, crownMatrices.length);
+  crowns.name = "regional gray-green saxaul and calligonum shrub crowns";
+  crowns.castShadow = true;
+  crowns.receiveShadow = true;
+  crownMatrices.forEach((matrix, index) => crowns.setMatrixAt(index, matrix));
+  scene.add(crowns);
+
+  const branches = new THREE.InstancedMesh(branchGeometry, MATERIALS.spinyShrubStem, branchMatrices.length);
+  branches.name = "regional spiny desert shrub branchlets";
+  branches.castShadow = true;
+  branches.receiveShadow = true;
+  branchMatrices.forEach((matrix, index) => branches.setMatrixAt(index, matrix));
+  scene.add(branches);
+}
+
+function setBranchMatrix(dummy, x, y, z, yaw, lift, length, radius) {
+  const direction = new THREE.Vector3(Math.cos(yaw) * (1 - lift), lift, Math.sin(yaw) * (1 - lift)).normalize();
+  dummy.position.set(x + direction.x * length * 0.5, y + direction.y * length * 0.5, z + direction.z * length * 0.5);
+  dummy.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+  dummy.scale.set(radius, length, radius);
+  dummy.updateMatrix();
 }
 
 function setMatrix(dummy, x, y, z, yaw, leanX, leanZ, scaleX, scaleY, scaleZ) {
