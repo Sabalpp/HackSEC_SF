@@ -3,30 +3,29 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { theaters } from "../data/theaters";
 import { vehicles } from "../data/vehicles";
 import { useLandForge } from "../hooks/useLandForge";
-import { VehiclePicker } from "./VehiclePicker";
 import { ConditionControls } from "./ConditionControls";
 import { MetricsPanel } from "./MetricsPanel";
 import { AssessmentCards } from "./AssessmentCards";
 import { TheaterEnvironment } from "./TheaterEnvironment";
+import { MissionTimeline } from "./MissionTimeline";
 import landforgeIcon from "../assets/landforge-icon.png";
 
-const formatCoord = (n) => `${n >= 0 ? "" : "-"}${Math.abs(n).toFixed(2)}°`;
+const formatCoord = (n) => `${n >= 0 ? "" : "-"}${Math.abs(n).toFixed(2)} deg`;
 
 function buildCustomTheater(lat, lng) {
   return {
     id: "custom",
-    label: `Custom · ${formatCoord(lat)}, ${formatCoord(lng)}`,
+    label: `Custom - ${formatCoord(lat)}, ${formatCoord(lng)}`,
     shortLabel: "Custom",
     region: "Operator-defined drop point",
     lat,
     lng,
-    intro: "Custom drop point — sim runs against generic terrain priors.",
-    accent: "#66d8ff",
+    intro: "Custom drop point -- sim runs against generic terrain priors.",
+    accent: "#22c55e",
   };
 }
 
 const PANELS = [
-  { id: "vehicle", label: "Vehicle" },
   { id: "conditions", label: "Conditions" },
   { id: "metrics", label: "Metrics" },
   { id: "report", label: "Report" },
@@ -58,12 +57,12 @@ export function TheaterWorkbench() {
   });
 
   const [open, setOpen] = useState({
-    vehicle: false,
     conditions: false,
     metrics: false,
     report: false,
   });
   const togglePanel = (id) => setOpen((p) => ({ ...p, [id]: !p[id] }));
+  const toggleVehicle = () => setVehicleId((current) => (current === "ugv" ? "drone" : "ugv"));
 
   if (!theater) {
     return (
@@ -111,6 +110,16 @@ export function TheaterWorkbench() {
             <div className="brand__name">{theater.label}</div>
           </div>
         </button>
+        <MissionTimeline output={output} />
+        <button
+          type="button"
+          className="vehicle-top-toggle"
+          onClick={toggleVehicle}
+          title="Switch vehicle"
+        >
+          <span>Vehicle</span>
+          <strong>{vehicle.label}</strong>
+        </button>
       </header>
 
       <nav className="wb-rail" aria-label="Panels">
@@ -127,16 +136,11 @@ export function TheaterWorkbench() {
         ))}
       </nav>
 
-      {open.vehicle && (
-        <div className="wb-panel wb-panel--bottom-center">
-          <VehiclePicker vehicleId={vehicleId} onChange={setVehicleId} />
-        </div>
-      )}
       {open.conditions && (
         <aside className="wb-panel wb-panel--left">
           <div className="wb-panel__head">
             <span>Conditions</span>
-            <button className="wb-panel__close" onClick={() => togglePanel("conditions")}>×</button>
+            <button className="wb-panel__close" onClick={() => togglePanel("conditions")}>x</button>
           </div>
           <div className="wb-panel__body">
             <ConditionControls input={input} setField={setField} />
@@ -152,7 +156,7 @@ export function TheaterWorkbench() {
         <aside className="wb-panel wb-panel--bottom-right">
           <div className="wb-panel__head">
             <span>Readiness Report</span>
-            <button className="wb-panel__close" onClick={() => togglePanel("report")}>×</button>
+            <button className="wb-panel__close" onClick={() => togglePanel("report")}>x</button>
           </div>
           <div className="wb-panel__body">
             <AssessmentCards cards={output.cards} />

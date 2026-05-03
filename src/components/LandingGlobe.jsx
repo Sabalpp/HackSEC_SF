@@ -1,10 +1,56 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Globe from "react-globe.gl";
+import * as THREE from "three";
 
-export function LandingGlobe({ markers, focusLatLng, onSelectMarker, onGlobeClick }) {
+const CLOSE_TRANSITION_ALTITUDE = 0.003;
+const MAX_BASE_PIXEL_RATIO = 2;
+const EARTH_TEXTURE_URL = "https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-base/january/world.200401.3x21600x10800.jpg";
+const EARTH_BUMP_URL = "https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png";
+
+export function LandingGlobe({
+  markers,
+  focusLatLng,
+  transitionTarget,
+  transitionDuration = 1500,
+  onSelectMarker,
+  onGlobeClick,
+}) {
   const containerRef = useRef(null);
   const globeRef = useRef(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+
+  const tuneGlobeQuality = useCallback(() => {
+    const globe = globeRef.current;
+    if (!globe) return;
+
+    const renderer = globe.renderer?.();
+    const maxAnisotropy = renderer?.capabilities?.getMaxAnisotropy?.() ?? 1;
+
+    renderer?.setPixelRatio(
+      Math.min(window.devicePixelRatio || 1, MAX_BASE_PIXEL_RATIO),
+    );
+
+    const camera = globe.camera?.();
+    if (camera) {
+      camera.near = 0.02;
+      camera.updateProjectionMatrix();
+    }
+
+    const material = globe.globeMaterial?.();
+    if (!material) return;
+
+    material.bumpScale = 3.2;
+    material.shininess = 9;
+    for (const texture of [material.map, material.bumpMap, material.specularMap]) {
+      if (!texture) continue;
+      texture.anisotropy = maxAnisotropy;
+      texture.generateMipmaps = true;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.needsUpdate = true;
+    }
+    material.needsUpdate = true;
+  }, []);
 
   useEffect(() => {
     function resize() {
@@ -26,14 +72,48 @@ export function LandingGlobe({ markers, focusLatLng, onSelectMarker, onGlobeClic
   }, [size.w]);
 
   useEffect(() => {
-    if (!globeRef.current || !focusLatLng) return;
-    globeRef.current.pointOfView(
-      { lat: focusLatLng.lat, lng: focusLatLng.lng, altitude: 1.55 },
-      900,
-    );
-  }, [focusLatLng]);
+    if (!globeRef.current || !focusLatLng || transitionTarget) return;
+    const raf = window.requestAnimationFrame(() => {
+      globeRef.current?.pointOfView(
+        { lat: focusLatLng.lat, lng: focusLatLng.lng, altitude: 1.55 },
+        420,
+      );
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [focusLatLng, transitionTarget]);
 
-  const ringsData = markers.filter((m) => m.selected);
+  useEffect(() => {
+    if (!globeRef.current || !transitionTarget) return undefined;
+
+    const globe = globeRef.current;
+    const controls = globe.controls();
+    const wasAutoRotating = controls.autoRotate;
+    const wasEnabled = controls.enabled;
+    const wasDampingEnabled = controls.enableDamping;
+
+    controls.autoRotate = false;
+    controls.enabled = false;
+    controls.enableDamping = false;
+
+    globe.pointOfView(
+      {
+        lat: transitionTarget.lat,
+        lng: transitionTarget.lng,
+        altitude: CLOSE_TRANSITION_ALTITUDE,
+      },
+      transitionDuration,
+    );
+
+    return () => {
+      controls.autoRotate = wasAutoRotating;
+      controls.enabled = wasEnabled;
+      controls.enableDamping = wasDampingEnabled;
+    };
+  }, [transitionDuration, transitionTarget, tuneGlobeQuality]);
+
+  const isTransitioning = Boolean(transitionTarget);
+  const ringsData = isTransitioning ? [] : markers.filter((m) => m.selected);
+  const htmlElementsData = isTransitioning ? [] : markers;
 
   return (
     <div ref={containerRef} className="lf-globe">
@@ -42,11 +122,16 @@ export function LandingGlobe({ markers, focusLatLng, onSelectMarker, onGlobeClic
           ref={globeRef}
           width={size.w}
           height={size.h}
+          rendererConfig={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
+          waitForGlobeReady
+          animateIn={false}
           backgroundColor="rgba(0,0,0,0)"
-          globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
-          bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
+          globeImageUrl={EARTH_TEXTURE_URL}
+          bumpImageUrl={EARTH_BUMP_URL}
+          globeCurvatureResolution={1.25}
           atmosphereColor="#7dd3fc"
-          atmosphereAltitude={0.18}
+          atmosphereAltitude={0}
+          onGlobeReady={tuneGlobeQuality}
           ringsData={ringsData}
           ringLat="lat"
           ringLng="lng"
@@ -54,7 +139,7 @@ export function LandingGlobe({ markers, focusLatLng, onSelectMarker, onGlobeClic
           ringMaxRadius={5.4}
           ringPropagationSpeed={1.4}
           ringRepeatPeriod={1400}
-          htmlElementsData={markers}
+          htmlElementsData={htmlElementsData}
           htmlLat="lat"
           htmlLng="lng"
           htmlElement={(point) => {
@@ -78,7 +163,9 @@ export function LandingGlobe({ markers, focusLatLng, onSelectMarker, onGlobeClic
             };
             return el;
           }}
-          onGlobeClick={({ lat, lng }) => onGlobeClick(lat, lng)}
+          onGlobeClick={({ lat, lng }) => {
+            if (!transitionTarget) onGlobeClick(lat, lng);
+          }}
         />
       )}
     </div>

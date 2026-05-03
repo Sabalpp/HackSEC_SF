@@ -11,6 +11,13 @@ const VEHICLE_FACTORIES = {
   drone: { globalKey: "RavenAirThreeJS", factoryKey: "createRavenAirSurrogate" },
 };
 
+const ENTRY_ZOOM_MS = 850;
+const ENTRY_ZOOM_DISTANCE = 2.25;
+
+function easeOutCubic(t) {
+  return 1 - (1 - t) ** 3;
+}
+
 function getFactory(vehicleId) {
   const cfg = VEHICLE_FACTORIES[vehicleId];
   if (!cfg) return null;
@@ -129,17 +136,25 @@ export function VehicleScene({ vehicleId, terrainBacked = false }) {
     const verticalAim = vehicleId === "drone" ? size.y * 0.6 + 0.6 : size.y * 0.45;
     camera.position.set(dist * 0.85, dist * 0.55, dist);
     camera.lookAt(0, verticalAim, 0);
+    const targetPosition = new THREE.Vector3(0, verticalAim, 0);
+    const finalCameraPosition = camera.position.clone();
+    const entryCameraPosition = targetPosition
+      .clone()
+      .add(finalCameraPosition.clone().sub(targetPosition).multiplyScalar(ENTRY_ZOOM_DISTANCE));
+    camera.position.copy(entryCameraPosition);
+    camera.lookAt(targetPosition);
 
     // Orbit controls — drag to rotate, scroll to zoom, right-drag to pan
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.target.set(0, verticalAim, 0);
+    controls.target.copy(targetPosition);
     controls.minDistance = Math.max(0.6, radius * 1.2);
     controls.maxDistance = Math.max(8, radius * 12);
     controls.maxPolarAngle = Math.PI * 0.49;
-    controls.autoRotate = true;
+    controls.autoRotate = false;
     controls.autoRotateSpeed = 0.6;
+    const entryStartedAt = performance.now();
     let userInteracting = false;
     controls.addEventListener("start", () => { userInteracting = true; controls.autoRotate = false; });
     controls.addEventListener("end", () => { userInteracting = false; });
@@ -170,6 +185,17 @@ export function VehicleScene({ vehicleId, terrainBacked = false }) {
       }
       if (asset && typeof asset.update === "function") {
         asset.update(dt);
+      }
+      const entryProgress = Math.min(1, (now - entryStartedAt) / ENTRY_ZOOM_MS);
+      if (entryProgress < 1) {
+        camera.position.lerpVectors(
+          entryCameraPosition,
+          finalCameraPosition,
+          easeOutCubic(entryProgress),
+        );
+        camera.lookAt(targetPosition);
+      } else if (!userInteracting) {
+        controls.autoRotate = true;
       }
       controls.update();
       renderer.render(scene, camera);
