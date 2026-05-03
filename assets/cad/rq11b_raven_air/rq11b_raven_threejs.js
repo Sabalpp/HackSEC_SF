@@ -9,6 +9,8 @@
       showLabels: true
     });
     scene.add(asset.group);
+    // Call once per render frame if using your own viewer:
+    asset.update(deltaSeconds);
 
   Optional full viewer:
     RavenAirThreeJS.createRavenViewer(THREE, document.body);
@@ -940,13 +942,36 @@
     com.userData.centerOfMass = true;
     group.add(com);
 
+    const propeller = group.getObjectByName("animated_two_blade_propeller");
+    let propSpinEnabled = settings.spinProp ?? true;
+    const maxAnimationDeltaSeconds = settings.maxAnimationDeltaSeconds ?? 0.05;
+    const fallbackDeltaSeconds = 1 / 60;
+
+    function update(deltaSeconds = fallbackDeltaSeconds, animationOptions = {}) {
+      const rawDelta = Number.isFinite(deltaSeconds) ? deltaSeconds : fallbackDeltaSeconds;
+      const safeDelta = Math.min(Math.max(rawDelta, 0), maxAnimationDeltaSeconds);
+      const spinEnabled = animationOptions.spinProp ?? propSpinEnabled;
+      const spinRate = animationOptions.propSpinRadiansPerSecond ?? settings.propSpinRadiansPerSecond ?? 18.0;
+
+      if (propeller && spinEnabled) {
+        propeller.rotation.x = (propeller.rotation.x + spinRate * safeDelta) % (Math.PI * 2);
+      }
+
+      return group;
+    }
+
     return {
       group,
       exterior,
       internalGroup,
       collisionGroup,
+      propeller,
       materials,
-      metadata: RAVEN_PHYSICS_METADATA
+      metadata: RAVEN_PHYSICS_METADATA,
+      update,
+      setPropSpin(enabled) {
+        propSpinEnabled = Boolean(enabled);
+      }
     };
   }
 
@@ -1085,7 +1110,9 @@
       showInternal: options.showInternal ?? true,
       showCollision: options.showCollision ?? false,
       ghostExterior: options.ghostExterior ?? false,
-      showLabels: options.showLabels ?? true
+      showLabels: options.showLabels ?? true,
+      spinProp: options.spinProp ?? true,
+      propSpinRadiansPerSecond: options.propSpinRadiansPerSecond ?? 18.0
     });
     scene.add(asset.group);
 
@@ -1106,12 +1133,10 @@
 
     let running = true;
     let autoRotateEnabled = Boolean(options.autoRotate);
-    let propSpinEnabled = options.spinProp ?? true;
     let previousTimestamp = null;
     const maxDeltaSeconds = 0.05;
     const fallbackDeltaSeconds = 1 / 60;
     const autoRotateRadiansPerSecond = options.autoRotateRadiansPerSecond ?? 0.18;
-    const propSpinRadiansPerSecond = options.propSpinRadiansPerSecond ?? 18.0;
 
     function animationDeltaSeconds(timestamp) {
       const now = Number.isFinite(timestamp)
@@ -1133,10 +1158,7 @@
         controls.state.azimuth -= autoRotateRadiansPerSecond * deltaSeconds;
         controls.update();
       }
-      const prop = asset.group.getObjectByName("animated_two_blade_propeller");
-      if (prop && propSpinEnabled) {
-        prop.rotation.x = (prop.rotation.x + propSpinRadiansPerSecond * deltaSeconds) % (Math.PI * 2);
-      }
+      asset.update(deltaSeconds);
       renderer.render(scene, camera);
     }
 
@@ -1164,7 +1186,7 @@
         autoRotateEnabled = Boolean(enabled);
       },
       setPropSpin(enabled) {
-        propSpinEnabled = Boolean(enabled);
+        asset.setPropSpin(enabled);
       },
       dispose() {
         running = false;
