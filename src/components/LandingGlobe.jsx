@@ -1,14 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import Globe from "react-globe.gl";
-import { useNavigate } from "react-router-dom";
-import { theaterList } from "../data/theaters";
 
-export function LandingGlobe() {
-  const navigate = useNavigate();
+export function LandingGlobe({ markers, focusLatLng, onSelectMarker, onGlobeClick }) {
   const containerRef = useRef(null);
   const globeRef = useRef(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
-  const [hover, setHover] = useState(null);
 
   useEffect(() => {
     function resize() {
@@ -22,38 +18,67 @@ export function LandingGlobe() {
   }, []);
 
   useEffect(() => {
-    if (globeRef.current) {
-      globeRef.current.controls().autoRotate = true;
-      globeRef.current.controls().autoRotateSpeed = 0.4;
-    }
-  }, []);
+    if (!globeRef.current) return;
+    const controls = globeRef.current.controls();
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 0.22;
+    controls.enablePan = false;
+  }, [size.w]);
 
-  const points = theaterList.map((t) => ({
-    ...t,
-    size: hover === t.id ? 1.2 : 0.8,
-    color: t.accent,
-  }));
+  useEffect(() => {
+    if (!globeRef.current || !focusLatLng) return;
+    globeRef.current.pointOfView(
+      { lat: focusLatLng.lat, lng: focusLatLng.lng, altitude: 1.55 },
+      900,
+    );
+  }, [focusLatLng]);
+
+  const ringsData = markers.filter((m) => m.selected);
 
   return (
-    <div ref={containerRef} className="landing__globe">
+    <div ref={containerRef} className="lf-globe">
       {size.w > 0 && (
         <Globe
           ref={globeRef}
           width={size.w}
           height={size.h}
           backgroundColor="rgba(0,0,0,0)"
-          globeImageUrl="//unpkg.com/three-globe/example/img/earth-night.jpg"
+          globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
+          bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
           atmosphereColor="#7dd3fc"
           atmosphereAltitude={0.18}
-          pointsData={points}
-          pointLat="lat"
-          pointLng="lng"
-          pointAltitude={0.02}
-          pointRadius="size"
-          pointColor="color"
-          pointLabel={(d) => `<div style="padding:6px 10px;background:#0c1220;border:1px solid #1b2742;border-radius:6px;color:#e6edff;font:13px system-ui">${d.label}</div>`}
-          onPointHover={(p) => setHover(p ? p.id : null)}
-          onPointClick={(p) => navigate(`/mission/${p.id}`)}
+          ringsData={ringsData}
+          ringLat="lat"
+          ringLng="lng"
+          ringColor={(p) => [p.accent, `${p.accent}00`]}
+          ringMaxRadius={5.4}
+          ringPropagationSpeed={1.4}
+          ringRepeatPeriod={1400}
+          htmlElementsData={markers}
+          htmlLat="lat"
+          htmlLng="lng"
+          htmlElement={(point) => {
+            const el = document.createElement("button");
+            el.type = "button";
+            el.className = `lf-beacon${point.selected ? " is-selected" : ""}${point.kind === "custom" ? " is-custom" : ""}`;
+            el.style.setProperty("--lf-beacon-color", point.accent);
+            el.innerHTML = `
+              <span class="lf-beacon__halo"></span>
+              <span class="lf-beacon__ring">
+                <span class="lf-beacon__sweep"></span>
+                <span class="lf-beacon__axis lf-beacon__axis--a"></span>
+                <span class="lf-beacon__axis lf-beacon__axis--b"></span>
+                <span class="lf-beacon__core"></span>
+              </span>
+              <span class="lf-beacon__label">${point.label}</span>
+            `;
+            el.onclick = (event) => {
+              event.stopPropagation();
+              onSelectMarker(point.id);
+            };
+            return el;
+          }}
+          onGlobeClick={({ lat, lng }) => onGlobeClick(lat, lng)}
         />
       )}
     </div>
