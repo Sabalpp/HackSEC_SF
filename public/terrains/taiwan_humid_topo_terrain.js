@@ -846,7 +846,7 @@ function addTreeInstancedMesh(scene, geometry, material, matrices, name, colors 
 
 function addFlowers(scene, terrainData) {
   const random = mulberry32(SEED + 2207);
-  const flowerStemGeometry = new THREE.CylinderGeometry(0.08, 0.1, 1, 5);
+  const flowerStemGeometry = new THREE.CylinderGeometry(0.011, 0.015, 1, 5);
   const flowerHeadGeometry = new THREE.IcosahedronGeometry(1, 0);
   const flowerStemMatrices = [];
   const whiteFlowerMatrices = [];
@@ -909,24 +909,24 @@ function addFlowerCluster(
 ) {
   for (let index = 0; index < count; index += 1) {
     const angle = randomRange(random, 0, Math.PI * 2);
-    const radius = Math.sqrt(random()) * randomRange(random, 1.2, 6.2);
+    const radius = Math.sqrt(random()) * randomRange(random, 0.45, 2.6);
     const x = centerX + Math.cos(angle) * radius;
     const z = centerZ + Math.sin(angle) * radius;
     const ground = renderHeightMetersAt(x, z);
-    const stemHeight = randomRange(random, 1.2, 3.2);
+    const stemHeight = randomRange(random, 0.18, 0.48);
     const yaw = randomRange(random, 0, Math.PI * 2);
     const leanX = randomRange(random, -0.08, 0.08);
     const leanZ = randomRange(random, -0.08, 0.08);
 
-    setMatrix(dummy, x, ground + stemHeight / 2 + 0.1, z, yaw, leanX, leanZ, 1, stemHeight, 1);
+    setMatrix(dummy, x, ground + stemHeight / 2 + 0.018, z, yaw, leanX, leanZ, 1, stemHeight, 1);
     stemMatrices.push(dummy.matrix.clone());
 
     const flowerMatrices = random() < 0.46 ? whiteFlowerMatrices : random() < 0.68 ? yellowFlowerMatrices : pinkFlowerMatrices;
-    const flowerScale = randomRange(random, 0.5, 0.92);
+    const flowerScale = randomRange(random, 0.045, 0.095);
     setMatrix(
       dummy,
       x + leanX * stemHeight * 0.6,
-      ground + stemHeight + 0.35,
+      ground + stemHeight + 0.035,
       z + leanZ * stemHeight * 0.6,
       yaw,
       leanX,
