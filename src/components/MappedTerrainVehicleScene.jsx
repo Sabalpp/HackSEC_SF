@@ -29,6 +29,89 @@ const EFFECT_COLORS = Object.freeze({
   snow: 0xf5fbff,
 });
 const EFFECT_PARTICLE_COUNT = 72;
+const HEALTH_WARN_START = 0.86;
+const HEALTH_ALERT_COLOR = new THREE.Color(0xffb020);
+const HEALTH_CRITICAL_COLOR = new THREE.Color(0xff2d1f);
+const HEALTH_PULSE_SPEED = 0.0032;
+
+const SUBSYSTEM_MATCHERS = Object.freeze({
+  sensors: [
+    "sensor",
+    "camera",
+    "lens",
+    "mast",
+    "optical",
+    "thermal",
+    "radar",
+    "gps",
+    "aperture",
+    "antenna",
+    "avionics",
+  ],
+  hydraulics: [
+    "hydraulic",
+    "actuator",
+    "arm",
+    "joint",
+    "gripper",
+    "servo",
+    "hinge",
+    "elevator",
+    "rudder",
+    "aileron",
+  ],
+  engine: [
+    "engine",
+    "motor",
+    "esc",
+    "prop",
+    "pusher",
+    "track",
+    "tread",
+    "wheel",
+    "idler",
+    "roller",
+    "grouser",
+    "drive",
+  ],
+  battery: [
+    "battery",
+    "payload",
+    "cable",
+    "connector",
+    "port",
+    "socket",
+    "bus",
+    "power",
+  ],
+  chassis: [
+    "chassis",
+    "hull",
+    "deck",
+    "armor",
+    "panel",
+    "plate",
+    "guard",
+    "latch",
+    "bolt",
+    "fuselage",
+    "airframe",
+    "wing",
+    "spar",
+    "boom",
+    "tail",
+    "stabilizer",
+    "strut",
+    "fairing",
+  ],
+});
+const SUBSYSTEM_PULSE_PHASE = Object.freeze({
+  chassis: 0,
+  sensors: 0,
+  engine: 0,
+  hydraulics: 0,
+  battery: 0,
+});
 
 function getFactory(vehicleId) {
   const cfg = VEHICLE_FACTORIES[vehicleId];
@@ -150,6 +233,122 @@ function sampleRoute(route, distanceMeters) {
   return { x, z, tangent: route.tangent };
 }
 
+function clampHealth(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.max(0, Math.min(1, parsed));
+}
+
+function nameChainForObject(object) {
+  const names = [];
+  let current = object;
+  while (current) {
+    if (current.name) names.push(current.name);
+    current = current.parent;
+  }
+  return names.join(" ").toLowerCase();
+}
+
+function subsystemForObject(object) {
+  if (object.userData?.centerOfMass || object.userData?.physicsPrimitive || object.userData?.physicsContactPatch) {
+    return null;
+  }
+
+  const nameChain = nameChainForObject(object);
+  if (!nameChain || nameChain.includes("collision") || nameChain.includes("contact")) {
+    return null;
+  }
+
+  for (const [subsystem, tokens] of Object.entries(SUBSYSTEM_MATCHERS)) {
+    if (tokens.some((token) => nameChain.includes(token))) {
+      return subsystem;
+    }
+  }
+
+  return null;
+}
+
+function cloneHealthMaterial(material, ownedMaterials) {
+  const clone = material.clone();
+  clone.userData.healthBaseColor = clone.color?.clone?.() ?? null;
+  clone.userData.healthBaseEmissive = clone.emissive?.clone?.() ?? null;
+  clone.userData.healthBaseEmissiveIntensity = Number.isFinite(clone.emissiveIntensity)
+    ? clone.emissiveIntensity
+    : 1;
+  ownedMaterials.push(clone);
+  return clone;
+}
+
+function createVehicleHealthVisualizer(root) {
+  const targets = [];
+  const ownedMaterials = [];
+  let lastUpdateMs = 0;
+
+  root.traverse((object) => {
+    if (!object.isMesh || !object.material) return;
+
+    const subsystem = subsystemForObject(object);
+    if (!subsystem) return;
+
+    const materials = Array.isArray(object.material)
+      ? object.material.map((material) => cloneHealthMaterial(material, ownedMaterials))
+      : [cloneHealthMaterial(object.material, ownedMaterials)];
+
+    object.material = Array.isArray(object.material) ? materials : materials[0];
+    targets.push({
+      subsystem,
+      materials,
+      phase: SUBSYSTEM_PULSE_PHASE[subsystem] ?? 0,
+      displayHealth: 1,
+    });
+  });
+
+  function update(snapshot, timeMs) {
+    const subsystems = snapshot?.subsystems ?? {};
+    const vehicleHealth = clampHealth(snapshot?.vehicle_health);
+    const dtSeconds = lastUpdateMs
+      ? Math.min(0.1, Math.max(0, (timeMs - lastUpdateMs) / 1000))
+      : 1 / 60;
+    const followAlpha = 1 - Math.exp(-dtSeconds * 4.8);
+    lastUpdateMs = timeMs;
+
+    targets.forEach((target) => {
+      const targetHealth = clampHealth(subsystems[target.subsystem] ?? vehicleHealth);
+      target.displayHealth += (targetHealth - target.displayHealth) * followAlpha;
+      const health = target.displayHealth;
+      const stress = Math.max(0, (HEALTH_WARN_START - health) / HEALTH_WARN_START);
+      const pulse = stress > 0
+        ? (Math.sin(timeMs * HEALTH_PULSE_SPEED + target.phase) + 1) * 0.5
+        : 0;
+      const criticalMix = Math.max(0, Math.min(1, (0.48 - health) / 0.48));
+      const alertColor = HEALTH_ALERT_COLOR.clone().lerp(HEALTH_CRITICAL_COLOR, criticalMix);
+      const colorPulse = stress * (0.18 + pulse * 0.82);
+      const emissivePulse = stress * (0.08 + pulse * 0.92);
+
+      target.materials.forEach((material) => {
+        const baseColor = material.userData.healthBaseColor;
+        if (baseColor && material.color) {
+          material.color.copy(baseColor).lerp(alertColor, Math.min(0.82, colorPulse * 0.82));
+        }
+
+        const baseEmissive = material.userData.healthBaseEmissive;
+        if (baseEmissive && material.emissive) {
+          const baseIntensity = material.userData.healthBaseEmissiveIntensity ?? 1;
+          material.emissive.copy(baseEmissive).lerp(alertColor, Math.min(0.9, emissivePulse * 0.9));
+          material.emissiveIntensity = baseIntensity + stress * (0.35 + pulse * 1.85);
+        }
+      });
+    });
+  }
+
+  return {
+    update,
+    dispose() {
+      ownedMaterials.forEach((material) => material.dispose?.());
+    },
+  };
+}
+
 function setForwardUpQuaternion(object, forward, up) {
   const xAxis = forward.lengthSq() > 0.000001
     ? forward.clone().normalize()
@@ -267,6 +466,7 @@ export function MappedTerrainVehicleScene({
   vehicleId,
   runToken = 0,
   simulationActive = false,
+  healthSnapshot = null,
   effectType = "dust",
   addWorld,
   renderHeightMetersAt,
@@ -277,10 +477,15 @@ export function MappedTerrainVehicleScene({
 }) {
   const mountRef = useRef(null);
   const simulationActiveRef = useRef(simulationActive);
+  const healthSnapshotRef = useRef(healthSnapshot);
 
   useEffect(() => {
     simulationActiveRef.current = simulationActive;
   }, [simulationActive]);
+
+  useEffect(() => {
+    healthSnapshotRef.current = healthSnapshot;
+  }, [healthSnapshot]);
 
   useEffect(() => {
     const mountEl = mountRef.current;
@@ -304,6 +509,7 @@ export function MappedTerrainVehicleScene({
     scene.add(pad);
 
     const { mount: vehicleMount, asset, size } = createVehicleModel(vehicleId);
+    const healthVisualizer = createVehicleHealthVisualizer(vehicleMount);
     const contactEffect = createContactEffect(effectType);
     scene.add(contactEffect.points);
     const initialForward = new THREE.Vector3(initialRouteSample.tangent.x, 0, initialRouteSample.tangent.y);
@@ -425,6 +631,7 @@ export function MappedTerrainVehicleScene({
       if ((runActive || vehicleId === "drone") && asset && typeof asset.update === "function") {
         asset.update(dt);
       }
+      healthVisualizer.update(healthSnapshotRef.current, now);
       contactEffect.update(dt);
       controls.update();
       renderer.render(scene, camera);
@@ -439,6 +646,7 @@ export function MappedTerrainVehicleScene({
       controls.dispose();
       texture.dispose();
       contactEffect.dispose();
+      healthVisualizer.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === mountEl) {
         mountEl.removeChild(renderer.domElement);

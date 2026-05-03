@@ -2620,6 +2620,7 @@ export function TheaterWorkbench() {
           vehicleId={vehicleId}
           runToken={runToken}
           simulationActive={isSimulationActive && !isSimulationPaused}
+          healthSnapshot={vehicleHealthSnapshot}
         />
       </div>
 

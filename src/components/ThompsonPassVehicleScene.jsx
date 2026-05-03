@@ -14,12 +14,13 @@ export function preloadDefaultTankScene() {
   terrainNormalAt(0, 0);
 }
 
-export function ThompsonPassVehicleScene({ vehicleId, runToken, simulationActive }) {
+export function ThompsonPassVehicleScene({ vehicleId, runToken, simulationActive, healthSnapshot }) {
   return (
     <MappedTerrainVehicleScene
       vehicleId={vehicleId}
       runToken={runToken}
       simulationActive={simulationActive}
+      healthSnapshot={healthSnapshot}
       effectType="snow"
       addWorld={addThompsonPassSnowTopoWorld}
       renderHeightMetersAt={renderHeightMetersAt}
