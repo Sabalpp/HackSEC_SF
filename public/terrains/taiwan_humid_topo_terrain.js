@@ -4,16 +4,16 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 export const TAIWAN_HUMID_TOPO_CONFIG = Object.freeze({
   name: "Taiwan Humid Topographic Terrain",
   center: {
-    latitude: 24.8652,
-    longitude: 121.5518,
+    latitude: 24.6769,
+    longitude: 121.7704,
   },
-  location: "Wulai, New Taipei, Taiwan",
-  centerElevationMetersAsl: 430,
+  location: "Luodong, Yilan Plain, Taiwan",
+  centerElevationMetersAsl: 18,
   terrainSizeMeters: 1000,
   verticalExaggeration: 1,
   contourIntervalMeters: 25,
   note:
-    "Procedural public terrain model inspired by humid mountain valleys in northern Taiwan. It is not a surveyed DEM tile.",
+    "Procedural public terrain model inspired by humid lowland and foothill terrain on Taiwan's Yilan Plain. It is not a surveyed DEM tile.",
 });
 
 const CONFIG = TAIWAN_HUMID_TOPO_CONFIG;
@@ -72,13 +72,25 @@ const MATERIALS = {
     transparent: true,
     opacity: 0.62,
   }),
-  landslideScar: new THREE.MeshStandardMaterial({
-    color: 0x8b7b5f,
-    roughness: 0.98,
+  flowerStem: new THREE.MeshStandardMaterial({
+    color: 0x3f6038,
+    roughness: 0.96,
     metalness: 0,
-    transparent: true,
-    opacity: 0.68,
-    depthWrite: false,
+  }),
+  flowerWhite: new THREE.MeshStandardMaterial({
+    color: 0xf1ead0,
+    roughness: 0.88,
+    metalness: 0,
+  }),
+  flowerPink: new THREE.MeshStandardMaterial({
+    color: 0xd99ca2,
+    roughness: 0.9,
+    metalness: 0,
+  }),
+  flowerYellow: new THREE.MeshStandardMaterial({
+    color: 0xd9c05b,
+    roughness: 0.9,
+    metalness: 0,
   }),
 };
 
@@ -122,9 +134,9 @@ export function createTaiwanHumidTopoScene(container = document.body, options = 
   addTerrain(scene, terrainData);
   addContourLines(scene, terrainData);
   addWetFootpath(scene);
-  addLandslideScars(scene);
   addWetRockOutcrops(scene, terrainData);
-  addRainforestTrees(scene);
+  addRainforestTrees(scene, terrainData);
+  addFlowers(scene, terrainData);
   addFogBoundaryPlane(scene);
   addScaleReference(scene);
   applyRadialFogToScene(scene);
@@ -172,35 +184,35 @@ export function terrainElevationMetersAt(xMetersEast, zMetersNorth) {
   const normalizedAcross = Math.abs(across) / HALF_TERRAIN;
   const normalizedAlong = along / HALF_TERRAIN;
 
-  const riverCut = -74 * Math.exp(-Math.pow(across / 54, 2)) * (0.92 + 0.08 * Math.sin(along * 0.017));
-  const westWall = 226 * smoothRamp(Math.max(0, (-across - 46) / 430), 1.58);
-  const eastWall = 276 * smoothRamp(Math.max(0, (across - 42) / 445), 1.68);
-  const northRise = 62 * smoothRamp(Math.max(0, normalizedAlong + 0.1), 1.22);
-  const southShoulder = 42 * smoothRamp(Math.max(0, -normalizedAlong - 0.04), 1.12);
+  const riverCut = -18 * Math.exp(-Math.pow(across / 86, 2)) * (0.92 + 0.08 * Math.sin(along * 0.017));
+  const westWall = 20 * smoothRamp(Math.max(0, (-across - 175) / 470), 1.24);
+  const eastWall = 74 * smoothRamp(Math.max(0, (across - 118) / 450), 1.42);
+  const northRise = 16 * smoothRamp(Math.max(0, normalizedAlong + 0.08), 1.1);
+  const southShoulder = 9 * smoothRamp(Math.max(0, -normalizedAlong - 0.08), 1.04);
   const convexSpurs =
-    31 * Math.exp(-Math.pow((across + 225) / 92, 2)) * Math.exp(-Math.pow((along + 130) / 355, 2)) +
-    36 * Math.exp(-Math.pow((across - 235) / 88, 2)) * Math.exp(-Math.pow((along - 95) / 385, 2));
+    9 * Math.exp(-Math.pow((across + 240) / 140, 2)) * Math.exp(-Math.pow((along + 130) / 390, 2)) +
+    18 * Math.exp(-Math.pow((across - 255) / 128, 2)) * Math.exp(-Math.pow((along - 95) / 420, 2));
   const riverTerraces =
-    -15 *
-      Math.exp(-Math.pow((Math.abs(across) - 88) / 34, 2)) *
-      Math.exp(-Math.pow((along + 105) / 380, 2)) +
-    -10 *
-      Math.exp(-Math.pow((Math.abs(across) - 138) / 42, 2)) *
-      Math.exp(-Math.pow((along - 190) / 360, 2));
+    -5.5 *
+      Math.exp(-Math.pow((Math.abs(across) - 112) / 54, 2)) *
+      Math.exp(-Math.pow((along + 105) / 430, 2)) +
+    -4 *
+      Math.exp(-Math.pow((Math.abs(across) - 180) / 66, 2)) *
+      Math.exp(-Math.pow((along - 190) / 410, 2));
 
   const tributaryGullies =
-    -29 * gully(across + 192 + 20 * Math.sin(along * 0.019), along, -250, 270) +
-    -24 * gully(across - 230 + 22 * Math.cos(along * 0.016), along, -40, 315) +
-    -18 * gully(across + 318 - 16 * Math.sin(along * 0.014), along, 210, 250) +
-    -15 * gully(across - 96, along, 315, 215);
+    -8.5 * gully(across + 215 + 20 * Math.sin(along * 0.019), along, -250, 310) +
+    -8 * gully(across - 240 + 22 * Math.cos(along * 0.016), along, -40, 340) +
+    -5.5 * gully(across + 330 - 16 * Math.sin(along * 0.014), along, 210, 285) +
+    -4.5 * gully(across - 115, along, 315, 250);
 
   const ridgeRoughness =
-    17.5 * fbm(xMetersEast * 0.012 + 8, zMetersNorth * 0.012 - 3, 5) * Math.min(1, normalizedAcross * 1.48) +
-    8.6 * fbm(xMetersEast * 0.029 - 19, zMetersNorth * 0.029 + 11, 4);
+    5.8 * fbm(xMetersEast * 0.012 + 8, zMetersNorth * 0.012 - 3, 5) * Math.min(1, normalizedAcross * 1.35) +
+    2.8 * fbm(xMetersEast * 0.029 - 19, zMetersNorth * 0.029 + 11, 4);
 
   const wetUndulation =
-    4.8 * Math.sin((along + 90) * 0.014) * Math.exp(-Math.pow(across / 250, 2)) +
-    3.6 * Math.cos((xMetersEast - zMetersNorth) * 0.01);
+    3.2 * Math.sin((along + 90) * 0.014) * Math.exp(-Math.pow(across / 300, 2)) +
+    2.4 * Math.cos((xMetersEast - zMetersNorth) * 0.01);
 
   return (
     riverCut +
@@ -213,7 +225,7 @@ export function terrainElevationMetersAt(xMetersEast, zMetersNorth) {
     tributaryGullies +
     ridgeRoughness +
     wetUndulation +
-    18
+    7
   );
 }
 
@@ -454,60 +466,6 @@ function addWetFootpath(scene) {
   scene.add(path);
 }
 
-function addLandslideScars(scene) {
-  const scars = [
-    { x: -275, z: -205, width: 120, depth: 46, rotation: -0.68, opacity: 0.64 },
-    { x: 302, z: -62, width: 158, depth: 54, rotation: 0.55, opacity: 0.7 },
-    { x: -330, z: 138, width: 134, depth: 44, rotation: -0.5, opacity: 0.58 },
-    { x: 238, z: 275, width: 108, depth: 42, rotation: 0.35, opacity: 0.6 },
-  ];
-
-  for (const scar of scars) {
-    const material = MATERIALS.landslideScar.clone();
-    material.opacity = scar.opacity;
-    const mesh = createTerrainPatch(scar, material, "wet exposed landslide scar");
-    scene.add(mesh);
-  }
-}
-
-function createTerrainPatch(patch, material, name) {
-  const xSegments = 14;
-  const zSegments = 5;
-  const positions = [];
-  const indices = [];
-
-  for (let zIndex = 0; zIndex <= zSegments; zIndex += 1) {
-    const localZ = THREE.MathUtils.lerp(-patch.depth / 2, patch.depth / 2, zIndex / zSegments);
-
-    for (let xIndex = 0; xIndex <= xSegments; xIndex += 1) {
-      const localX = THREE.MathUtils.lerp(-patch.width / 2, patch.width / 2, xIndex / xSegments);
-      const world = rotateAndTranslate(localX, localZ, patch.x, patch.z, patch.rotation);
-      positions.push(world.x, renderHeightMetersAt(world.x, world.z) + 0.9, world.z);
-    }
-  }
-
-  for (let zIndex = 0; zIndex < zSegments; zIndex += 1) {
-    for (let xIndex = 0; xIndex < xSegments; xIndex += 1) {
-      const rowWidth = xSegments + 1;
-      const a = zIndex * rowWidth + xIndex;
-      const b = a + 1;
-      const c = a + rowWidth;
-      const d = c + 1;
-      indices.push(a, c, b, b, c, d);
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = name;
-  mesh.receiveShadow = true;
-  return mesh;
-}
-
 function addWetRockOutcrops(scene, terrainData) {
   const random = mulberry32(SEED + 911);
   const geometry = new THREE.DodecahedronGeometry(1, 0);
@@ -546,7 +504,7 @@ function addWetRockOutcrops(scene, terrainData) {
     const valleyBoulderScale =
       Math.pow(bottomAffinity, 2.18) * valleyProximity * randomRange(random, 2.6, 7.8);
     const slopeChipScale = randomRange(random, 0.22, 1.0) * (1 - bottomAffinity) * THREE.MathUtils.clamp(slope, 0.25, 0.9);
-    const scale = Math.max(0.28, baseScale + valleyBoulderScale + slopeChipScale);
+    const scale = Math.max(0.28, baseScale + valleyBoulderScale + slopeChipScale) * 0.5;
     const longAxis = randomRange(random, 0.78, 2.15) * (1 + valleyProximity * bottomAffinity * 0.54);
     const heightAxis = randomRange(random, 0.18, 0.58) * (0.62 + bottomAffinity * 0.45);
     const depthAxis = randomRange(random, 0.58, 1.58) * (1 + slope * 0.26);
@@ -566,7 +524,7 @@ function addWetRockOutcrops(scene, terrainData) {
   scene.add(rocks);
 }
 
-function addRainforestTrees(scene) {
+function addRainforestTrees(scene, terrainData) {
   const random = mulberry32(SEED + 1304);
   const trunkGeometry = new THREE.CylinderGeometry(0.72, 1, 1, 7);
   const roundedCanopyGeometry = new THREE.IcosahedronGeometry(1, 1);
@@ -579,6 +537,7 @@ function addRainforestTrees(scene) {
   const patchTreeMultiplier = 2;
   const targetCount = 880 * patchTreeMultiplier;
   const minTreeSpacing = 11.5;
+  const elevationSpan = Math.max(terrainData.maxElevation - terrainData.minElevation, 1);
   const plantedPositions = [];
   const patchSpecs = [
     { z: -425, lateral: -190, radiusX: 68, radiusZ: 82, count: 58 },
@@ -620,12 +579,13 @@ function addRainforestTrees(scene) {
       const slope = terrainSlopeAt(x, z);
       const across = Math.abs(x - riverAxisAt(z));
       const canopyNoise = fbm(x * 0.019 + 4, z * 0.019 - 6, 4);
-      const elevationFade = 1 - THREE.MathUtils.clamp((elevation - 70) / 340, 0, 0.58);
+      const height01 = THREE.MathUtils.clamp((elevation - terrainData.minElevation) / elevationSpan, 0, 1);
+      const elevationFade = 1 - THREE.MathUtils.clamp(height01 * 0.48, 0, 0.48);
       const density = 0.48 + canopyNoise * 0.34 + elevationFade * 0.18;
 
       if (across < 42) continue;
       if (slope > 0.74) continue;
-      if (elevation > 360 && random() < 0.58) continue;
+      if (height01 > 0.82 && random() < 0.58) continue;
       if (random() > density) continue;
       if (isNearExistingTree(x, z, plantedPositions, minTreeSpacing)) continue;
 
@@ -754,6 +714,114 @@ function plantBroadleafTree(
 }
 
 function addTreeInstancedMesh(scene, geometry, material, matrices, name) {
+  const mesh = new THREE.InstancedMesh(geometry, material, matrices.length);
+  mesh.name = name;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  matrices.forEach((matrix, index) => mesh.setMatrixAt(index, matrix));
+  scene.add(mesh);
+}
+
+function addFlowers(scene, terrainData) {
+  const random = mulberry32(SEED + 2207);
+  const flowerStemGeometry = new THREE.CylinderGeometry(0.08, 0.1, 1, 5);
+  const flowerHeadGeometry = new THREE.IcosahedronGeometry(1, 0);
+  const flowerStemMatrices = [];
+  const whiteFlowerMatrices = [];
+  const pinkFlowerMatrices = [];
+  const yellowFlowerMatrices = [];
+  const dummy = new THREE.Object3D();
+  const elevationSpan = Math.max(terrainData.maxElevation - terrainData.minElevation, 1);
+
+  for (let z = -HALF_TERRAIN + 34; z <= HALF_TERRAIN - 34; z += 18) {
+    for (let x = -HALF_TERRAIN + 34; x <= HALF_TERRAIN - 34; x += 18) {
+      const sampleX = x + randomRange(random, -7.5, 7.5);
+      const sampleZ = z + randomRange(random, -7.5, 7.5);
+      const elevation = terrainElevationMetersAt(sampleX, sampleZ);
+      const slope = terrainSlopeAt(sampleX, sampleZ);
+      const height01 = THREE.MathUtils.clamp((elevation - terrainData.minElevation) / elevationSpan, 0, 1);
+      const wetMeadowNoise = fbm(sampleX * 0.014 + 51, sampleZ * 0.014 - 37, 4);
+      const openGroundNoise = fbm(sampleX * 0.032 - 12, sampleZ * 0.032 + 29, 3);
+      const density =
+        0.4 +
+        wetMeadowNoise * 0.38 +
+        (1 - height01) * 0.16 -
+        Math.max(0, slope - 0.32) * 0.55;
+
+      if (slope > 0.58) continue;
+      if (random() > THREE.MathUtils.clamp(density, 0.12, 0.88)) continue;
+
+      const flowerChance = (wetMeadowNoise * 0.18 + openGroundNoise * 0.12) * (1 - height01 * 0.35);
+      if (random() < flowerChance) {
+        addFlowerCluster(
+          dummy,
+          random,
+          sampleX,
+          sampleZ,
+          randomRange(random, 2, 5),
+          flowerStemMatrices,
+          whiteFlowerMatrices,
+          pinkFlowerMatrices,
+          yellowFlowerMatrices,
+        );
+      }
+    }
+  }
+
+  addInstancedMesh(scene, flowerStemGeometry, MATERIALS.flowerStem, flowerStemMatrices, "small meadow flower stems");
+  addInstancedMesh(scene, flowerHeadGeometry, MATERIALS.flowerWhite, whiteFlowerMatrices, "small white meadow flowers");
+  addInstancedMesh(scene, flowerHeadGeometry, MATERIALS.flowerPink, pinkFlowerMatrices, "small pink meadow flowers");
+  addInstancedMesh(scene, flowerHeadGeometry, MATERIALS.flowerYellow, yellowFlowerMatrices, "small yellow meadow flowers");
+}
+
+function addFlowerCluster(
+  dummy,
+  random,
+  centerX,
+  centerZ,
+  count,
+  stemMatrices,
+  whiteFlowerMatrices,
+  pinkFlowerMatrices,
+  yellowFlowerMatrices,
+) {
+  for (let index = 0; index < count; index += 1) {
+    const angle = randomRange(random, 0, Math.PI * 2);
+    const radius = Math.sqrt(random()) * randomRange(random, 1.2, 6.2);
+    const x = centerX + Math.cos(angle) * radius;
+    const z = centerZ + Math.sin(angle) * radius;
+    const ground = renderHeightMetersAt(x, z);
+    const stemHeight = randomRange(random, 1.2, 3.2);
+    const yaw = randomRange(random, 0, Math.PI * 2);
+    const leanX = randomRange(random, -0.08, 0.08);
+    const leanZ = randomRange(random, -0.08, 0.08);
+
+    setMatrix(dummy, x, ground + stemHeight / 2 + 0.1, z, yaw, leanX, leanZ, 1, stemHeight, 1);
+    stemMatrices.push(dummy.matrix.clone());
+
+    const flowerMatrices = random() < 0.46 ? whiteFlowerMatrices : random() < 0.68 ? yellowFlowerMatrices : pinkFlowerMatrices;
+    const flowerScale = randomRange(random, 0.5, 0.92);
+    setMatrix(
+      dummy,
+      x + leanX * stemHeight * 0.6,
+      ground + stemHeight + 0.35,
+      z + leanZ * stemHeight * 0.6,
+      yaw,
+      leanX,
+      leanZ,
+      flowerScale,
+      flowerScale * randomRange(random, 0.58, 0.86),
+      flowerScale,
+    );
+    flowerMatrices.push(dummy.matrix.clone());
+  }
+}
+
+function addInstancedMesh(scene, geometry, material, matrices, name) {
+  if (matrices.length === 0) {
+    return;
+  }
+
   const mesh = new THREE.InstancedMesh(geometry, material, matrices.length);
   mesh.name = name;
   mesh.castShadow = true;
