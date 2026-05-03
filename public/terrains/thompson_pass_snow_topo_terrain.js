@@ -22,7 +22,8 @@ const HALF_TERRAIN = TERRAIN_SIZE / 2;
 const GRID_SEGMENTS = 220;
 const VERTICAL_EXAGGERATION = CONFIG.verticalExaggeration;
 const SEED = 61131302;
-const FOG_COLOR = 0xdce4e7;
+const SKY_COLOR = 0xd7eefb;
+const FOG_COLOR = SKY_COLOR;
 const RADIAL_FOG = Object.freeze({
   innerRadiusMeters: 500,
   outerRadiusMeters: 1000,
@@ -94,7 +95,7 @@ export function createThompsonPassSnowTopoScene(container = document.body, optio
 
   const scene = new THREE.Scene();
   scene.name = CONFIG.name;
-  scene.background = new THREE.Color(FOG_COLOR);
+  scene.background = new THREE.Color(SKY_COLOR);
   scene.fog = new THREE.Fog(FOG_COLOR, 540, 1180);
 
   const camera = new THREE.PerspectiveCamera(54, 1, CAMERA_COLLISION.nearPlaneMeters, 2400);
