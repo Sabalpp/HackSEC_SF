@@ -5,7 +5,6 @@ import { TheaterWorkbench } from "./components/TheaterWorkbench";
 import { preloadDefaultTankScene } from "./components/ThompsonPassVehicleScene";
 import { Stars } from "./components/Stars";
 import { theaterList } from "./data/theaters";
-import landforgeIcon from "./assets/landforge-icon.png";
 
 const CUSTOM_ACCENT = "#22c55e";
 const TRANSITION_ZOOM_MS = 900;
@@ -124,7 +123,6 @@ function LandingPage({ routeTransition, onBeginRouteTransition }) {
 
       <div className="lf-overlay">
         <header className="lf-overlay__top">
-          <img src={landforgeIcon} alt="LandForge" className="lf-overlay__mark" />
           <div className="lf-overlay__brand">
             <div className="lf-overlay__eyebrow">Land Autonomy Systems</div>
             <div className="lf-overlay__title">LANDFORGE</div>
