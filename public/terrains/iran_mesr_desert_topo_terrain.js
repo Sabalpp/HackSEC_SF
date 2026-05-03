@@ -116,14 +116,10 @@ export function createIranMesrDesertTopoScene(container = document.body, options
 
   const terrainData = buildTerrainData();
   addTerrain(scene, terrainData);
-  addContourLines(scene, terrainData);
-  addDryWashChannels(scene);
-  addDuneCrestLines(scene);
   addRockOutcrops(scene);
   addSparseDesertShrubs(scene);
   addPricklyPearCacti(scene);
   addFogBoundaryPlane(scene);
-  addScaleReference(scene);
   applyRadialFogToScene(scene);
 
   const resize = () => {
@@ -171,25 +167,25 @@ export function terrainElevationMetersAt(xMetersEast, zMetersNorth) {
   const crossRipple = Math.sin(u * 0.014 - v * 0.018 + 0.8);
   const valleyScore = duneValleyScoreAt(xMetersEast, zMetersNorth);
 
-  const basinTilt = 0.0055 * zMetersNorth - 0.0025 * xMetersEast;
+  const basinTilt = 0.0018 * zMetersNorth - 0.0008 * xMetersEast;
   const rollingDunes =
     duneEnvelope *
-    (17.5 * primaryWave +
-      7.5 * secondaryWave +
-      3.8 * crossRipple +
-      5.2 * Math.pow(Math.max(0, primaryWave), 2.1));
-  const interduneSwales = -7.8 * valleyScore;
+    (3.8 * primaryWave +
+      1.7 * secondaryWave +
+      0.75 * crossRipple +
+      1.1 * Math.pow(Math.max(0, primaryWave), 2.1));
+  const interduneSwales = -1.6 * valleyScore;
   const broadSandSheet =
-    7.5 * Math.sin((u + 180) * 0.006) * Math.exp(-Math.pow(v / 730, 2)) +
-    5.2 * fbm(xMetersEast * 0.004 + 12, zMetersNorth * 0.004 - 3, 4);
+    1.45 * Math.sin((u + 180) * 0.006) * Math.exp(-Math.pow(v / 730, 2)) +
+    1.05 * fbm(xMetersEast * 0.004 + 12, zMetersNorth * 0.004 - 3, 4);
   const softDryWashes =
-    -5.4 * desertWash(u + 165 + 18 * Math.sin(v * 0.008), v, -160, 450) +
-    -3.8 * desertWash(u - 215 + 14 * Math.cos(v * 0.009), v, 160, 390);
+    -0.9 * desertWash(u + 165 + 18 * Math.sin(v * 0.008), v, -160, 450) +
+    -0.65 * desertWash(u - 215 + 14 * Math.cos(v * 0.009), v, 160, 390);
   const fineSandTexture =
-    1.6 * fbm(xMetersEast * 0.019 + 19, zMetersNorth * 0.019 - 7, 4) +
-    0.9 * fbm(u * 0.046 - 4, v * 0.046 + 23, 3);
+    0.26 * fbm(xMetersEast * 0.019 + 19, zMetersNorth * 0.019 - 7, 4) +
+    0.14 * fbm(u * 0.046 - 4, v * 0.046 + 23, 3);
 
-  return basinTilt + rollingDunes + interduneSwales + broadSandSheet + softDryWashes + fineSandTexture - 16;
+  return basinTilt + rollingDunes + interduneSwales + broadSandSheet + softDryWashes + fineSandTexture - 3.2;
 }
 
 export function renderHeightMetersAt(xMetersEast, zMetersNorth) {
@@ -570,8 +566,8 @@ function addSparseDesertShrubs(scene) {
     if (survivalNoise < 0.52) continue;
 
     const ground = renderHeightMetersAt(x, z);
-    const height = randomRange(random, 0.9, 2.3);
-    const radius = randomRange(random, 0.85, 1.9);
+    const height = randomRange(random, 0.35, 1.05);
+    const radius = randomRange(random, 0.34, 0.95);
 
     setMatrix(
       dummy,
@@ -603,7 +599,7 @@ function addPricklyPearCacti(scene) {
   const padMatrices = [];
   const areoleMatrices = [];
   const dummy = new THREE.Object3D();
-  const targetCount = 58;
+  const targetCount = 46;
   let attempts = 0;
 
   while (padMatrices.length < targetCount * 3 && attempts < targetCount * 32) {
@@ -620,7 +616,7 @@ function addPricklyPearCacti(scene) {
 
     const ground = renderHeightMetersAt(x, z);
     const yaw = randomRange(random, 0, Math.PI * 2);
-    const size = randomRange(random, 0.82, 1.32);
+    const size = randomRange(random, 0.55, 0.9);
 
     plantPricklyPearCactus(dummy, random, x, ground, z, yaw, size, padMatrices, areoleMatrices);
   }
@@ -640,9 +636,9 @@ function addPricklyPearCacti(scene) {
 }
 
 function plantPricklyPearCactus(dummy, random, x, ground, z, yaw, size, padMatrices, areoleMatrices) {
-  const baseHeight = randomRange(random, 4.2, 6.5) * size;
+  const baseHeight = randomRange(random, 0.9, 1.65) * size;
   const baseWidth = baseHeight * randomRange(random, 0.38, 0.52);
-  const baseThickness = randomRange(random, 0.26, 0.44) * size;
+  const baseThickness = randomRange(random, 0.1, 0.18) * size;
   const padPlan = [
     {
       offsetX: 0,
@@ -656,7 +652,7 @@ function plantPricklyPearCactus(dummy, random, x, ground, z, yaw, size, padMatri
     },
   ];
 
-  const sideCount = 1 + Math.floor(random() * 3);
+  const sideCount = 1 + Math.floor(random() * 2);
   for (let i = 0; i < sideCount; i += 1) {
     const side = i % 2 === 0 ? -1 : 1;
     const height = baseHeight * randomRange(random, 0.54, 0.78);
@@ -736,7 +732,7 @@ function addFogBoundaryPlane(scene) {
   const plane = new THREE.Mesh(geometry, material);
   plane.name = "low-detail fog boundary outside 1 km terrain";
   plane.rotation.x = -Math.PI / 2;
-  plane.position.y = -92;
+  plane.position.y = -24;
   scene.add(plane);
 }
 

@@ -1,17 +1,17 @@
 import { MappedTerrainVehicleScene } from "./MappedTerrainVehicleScene";
 import {
-  addThompsonPassSnowTopoWorld,
+  addTaiwanHumidTopoWorld,
   renderHeightMetersAt,
   terrainNormalAt,
-} from "../terrains/thompson_pass_snow_topo_terrain";
+} from "../terrains/taiwan_humid_topo_terrain";
 
-export function ThompsonPassVehicleScene({ vehicleId, runToken }) {
+export function TaiwanHumidVehicleScene({ vehicleId, runToken }) {
   return (
     <MappedTerrainVehicleScene
       vehicleId={vehicleId}
       runToken={runToken}
-      effectType="snow"
-      addWorld={addThompsonPassSnowTopoWorld}
+      effectType="mist"
+      addWorld={addTaiwanHumidTopoWorld}
       renderHeightMetersAt={renderHeightMetersAt}
       terrainNormalAt={terrainNormalAt}
     />

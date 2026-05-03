@@ -49,6 +49,7 @@ export function TheaterWorkbench() {
   }, [theaterId, searchParams]);
 
   const [vehicleId, setVehicleId] = useState("ugv");
+  const [runToken, setRunToken] = useState(0);
   const vehicle = vehicles[vehicleId];
 
   const theaterIdForSim = theater && theater.id !== "custom" ? theater.id : "arctic";
@@ -95,7 +96,11 @@ export function TheaterWorkbench() {
   return (
     <div className="wb-full">
       <div className="wb-environment">
-        <TheaterEnvironment theaterId={theaterIdForSim} vehicleId={vehicleId} />
+        <TheaterEnvironment
+          theaterId={theaterIdForSim}
+          vehicleId={vehicleId}
+          runToken={runToken}
+        />
       </div>
 
       <header className="wb-overlay-top">
@@ -110,6 +115,13 @@ export function TheaterWorkbench() {
             <div className="brand__eyebrow">{theater.region}</div>
             <div className="brand__name">{theater.label}</div>
           </div>
+        </button>
+        <button
+          type="button"
+          className="run-sim-button"
+          onClick={() => setRunToken((token) => token + 1)}
+        >
+          Run Simulation
         </button>
       </header>
 

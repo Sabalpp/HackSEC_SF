@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 export const TAIWAN_HUMID_TOPO_CONFIG = Object.freeze({
   name: "Taiwan Humid Topographic Terrain",
@@ -163,6 +163,34 @@ export function createTaiwanHumidTopoScene(container = document.body, options = 
   };
 }
 
+export function addTaiwanHumidTopoWorld(scene, options = {}) {
+  scene.name = CONFIG.name;
+
+  if (options.fog !== false) {
+    scene.background = new THREE.Color(FOG_COLOR);
+    scene.fog = new THREE.Fog(FOG_COLOR, 540, 1180);
+  }
+
+  if (options.lighting !== false) {
+    addLighting(scene);
+  }
+
+  const terrainData = buildTerrainData();
+  addTerrain(scene, terrainData);
+  addWetFootpath(scene);
+  addLandslideScars(scene);
+  addWetRockOutcrops(scene, terrainData);
+  addRainforestTrees(scene);
+  addFogBoundaryPlane(scene);
+  applyRadialFogToScene(scene);
+
+  return {
+    config: CONFIG,
+    terrainData,
+    centerHeightMeters: renderHeightMetersAt(0, 0),
+  };
+}
+
 export function terrainElevationMetersAt(xMetersEast, zMetersNorth) {
   const valleyAxis = riverAxisAt(zMetersNorth);
   const across = xMetersEast - valleyAxis;
@@ -217,6 +245,17 @@ export function terrainElevationMetersAt(xMetersEast, zMetersNorth) {
 
 export function renderHeightMetersAt(xMetersEast, zMetersNorth) {
   return terrainElevationMetersAt(xMetersEast, zMetersNorth) * VERTICAL_EXAGGERATION;
+}
+
+export function terrainNormalAt(xMetersEast, zMetersNorth, sampleMeters = 4.5) {
+  const left = renderHeightMetersAt(xMetersEast - sampleMeters, zMetersNorth);
+  const right = renderHeightMetersAt(xMetersEast + sampleMeters, zMetersNorth);
+  const down = renderHeightMetersAt(xMetersEast, zMetersNorth - sampleMeters);
+  const up = renderHeightMetersAt(xMetersEast, zMetersNorth + sampleMeters);
+  const east = new THREE.Vector3(sampleMeters * 2, right - left, 0);
+  const north = new THREE.Vector3(0, up - down, sampleMeters * 2);
+
+  return new THREE.Vector3().crossVectors(north, east).normalize();
 }
 
 export function metersToLatLon(xMetersEast, zMetersNorth) {

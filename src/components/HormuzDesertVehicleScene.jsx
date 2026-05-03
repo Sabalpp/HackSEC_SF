@@ -1,17 +1,17 @@
 import { MappedTerrainVehicleScene } from "./MappedTerrainVehicleScene";
 import {
-  addThompsonPassSnowTopoWorld,
+  addIranMesrDesertTopoWorld,
   renderHeightMetersAt,
   terrainNormalAt,
-} from "../terrains/thompson_pass_snow_topo_terrain";
+} from "../terrains/iran_mesr_desert_topo_terrain";
 
-export function ThompsonPassVehicleScene({ vehicleId, runToken }) {
+export function HormuzDesertVehicleScene({ vehicleId, runToken }) {
   return (
     <MappedTerrainVehicleScene
       vehicleId={vehicleId}
       runToken={runToken}
-      effectType="snow"
-      addWorld={addThompsonPassSnowTopoWorld}
+      effectType="dust"
+      addWorld={addIranMesrDesertTopoWorld}
       renderHeightMetersAt={renderHeightMetersAt}
       terrainNormalAt={terrainNormalAt}
     />

@@ -1,28 +1,28 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
-export const THOMPSON_PASS_SNOW_TOPO_CONFIG = Object.freeze({
-  name: "Thompson Pass Snow Topographic Terrain",
+export const IRAN_MESR_DESERT_TOPO_CONFIG = Object.freeze({
+  name: "Iran Mesr Desert Sand Dune Terrain",
   center: {
-    latitude: 61.13130296,
-    longitude: -145.7367325,
+    latitude: 34.071,
+    longitude: 54.782,
   },
-  location: "Thompson Pass, Chugach Mountains, Near Valdez, Alaska",
-  centerElevationMetersAsl: 855,
+  location: "Mesr Desert dune field, Dasht-e Kavir, Isfahan Province, Iran",
+  centerElevationMetersAsl: 720,
   terrainSizeMeters: 1000,
   verticalExaggeration: 1,
   contourIntervalMeters: 25,
   note:
-    "Procedural public terrain model inspired by Thompson Pass alpine topography. It is not a surveyed DEM tile.",
+    "Procedural public terrain model inspired by the Mesr Desert dune field in Dasht-e Kavir. It is not a surveyed DEM tile.",
 });
 
-const CONFIG = THOMPSON_PASS_SNOW_TOPO_CONFIG;
+const CONFIG = IRAN_MESR_DESERT_TOPO_CONFIG;
 const TERRAIN_SIZE = CONFIG.terrainSizeMeters;
 const HALF_TERRAIN = TERRAIN_SIZE / 2;
 const GRID_SEGMENTS = 220;
 const VERTICAL_EXAGGERATION = CONFIG.verticalExaggeration;
-const SEED = 61131302;
-const FOG_COLOR = 0xdce4e7;
+const SEED = 30648057;
+const FOG_COLOR = 0xd8cdb9;
 const RADIAL_FOG = Object.freeze({
   innerRadiusMeters: 500,
   outerRadiusMeters: 1000,
@@ -34,50 +34,51 @@ const RADIAL_FOG = Object.freeze({
 
 const MATERIALS = {
   rock: new THREE.MeshStandardMaterial({
-    color: 0x5d6060,
-    roughness: 0.92,
+    color: 0x756854,
+    roughness: 0.96,
     metalness: 0.02,
   }),
-  pineTrunk: new THREE.MeshStandardMaterial({
-    color: 0x493d31,
-    roughness: 0.94,
-    metalness: 0,
-  }),
-  pineNeedles: new THREE.MeshStandardMaterial({
-    color: 0x253d2f,
-    roughness: 0.96,
-    metalness: 0,
-  }),
-  pineSnow: new THREE.MeshStandardMaterial({
-    color: 0xfbfffd,
-    roughness: 0.88,
-    metalness: 0,
-  }),
   contourMinor: new THREE.LineBasicMaterial({
-    color: 0x667377,
+    color: 0x8e7058,
     transparent: true,
-    opacity: 0.46,
+    opacity: 0.42,
     fog: true,
   }),
   contourMajor: new THREE.LineBasicMaterial({
-    color: 0x34444a,
+    color: 0x5d4637,
     transparent: true,
-    opacity: 0.72,
+    opacity: 0.7,
     fog: true,
   }),
-  snowRoad: new THREE.MeshStandardMaterial({
-    color: 0xcbd5d8,
+  washFloor: new THREE.MeshStandardMaterial({
+    color: 0xcfa873,
     roughness: 0.96,
     metalness: 0,
   }),
-  slopeShadow: new THREE.MeshStandardMaterial({
-    color: 0xb7c2c6,
+  duneCrest: new THREE.LineBasicMaterial({
+    color: 0xf7d99b,
+    transparent: true,
+    opacity: 0.42,
+    fog: true,
+  }),
+  dryShrub: new THREE.MeshStandardMaterial({
+    color: 0x776542,
     roughness: 0.98,
+    metalness: 0,
+  }),
+  cactusPad: new THREE.MeshStandardMaterial({
+    color: 0x4f7f49,
+    roughness: 0.9,
+    metalness: 0,
+  }),
+  cactusAreole: new THREE.MeshStandardMaterial({
+    color: 0xf1dfbb,
+    roughness: 0.86,
     metalness: 0,
   }),
 };
 
-export function createThompsonPassSnowTopoScene(container = document.body, options = {}) {
+export function createIranMesrDesertTopoScene(container = document.body, options = {}) {
   const target = typeof container === "string" ? document.querySelector(container) : container;
 
   if (!target) {
@@ -90,7 +91,7 @@ export function createThompsonPassSnowTopoScene(container = document.body, optio
   scene.fog = new THREE.Fog(FOG_COLOR, 540, 1180);
 
   const camera = new THREE.PerspectiveCamera(54, 1, 1, 2400);
-  camera.position.set(420, 310, 610);
+  camera.position.set(385, 235, 500);
 
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
@@ -104,7 +105,7 @@ export function createThompsonPassSnowTopoScene(container = document.body, optio
   target.appendChild(renderer.domElement);
 
   const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 35, 0);
+  controls.target.set(0, 10, 0);
   controls.enableDamping = true;
   controls.maxDistance = 1050;
   controls.minDistance = 25;
@@ -115,9 +116,10 @@ export function createThompsonPassSnowTopoScene(container = document.body, optio
 
   const terrainData = buildTerrainData();
   addTerrain(scene, terrainData);
-  addWindPackedSnowfields(scene);
   addRockOutcrops(scene);
-  addSnowToppedPineTrees(scene);
+  addSparseDesertShrubs(scene);
+  addPricklyPearCacti(scene);
+  addFogBoundaryPlane(scene);
   applyRadialFogToScene(scene);
 
   const resize = () => {
@@ -156,54 +158,7 @@ export function createThompsonPassSnowTopoScene(container = document.body, optio
   };
 }
 
-export function terrainElevationMetersAt(xMetersEast, zMetersNorth) {
-  const valleyAxis = valleyAxisAt(zMetersNorth);
-  const across = xMetersEast - valleyAxis;
-  const along = zMetersNorth;
-  const normalizedAcross = Math.abs(across) / HALF_TERRAIN;
-  const normalizedAlong = along / HALF_TERRAIN;
-
-  const saddle = -34 * Math.exp(-Math.pow(along / 245, 2));
-  const westWall = 152 * smoothRamp(Math.max(0, (-across - 75) / 430), 1.55);
-  const eastWall = 196 * smoothRamp(Math.max(0, (across - 55) / 445), 1.72);
-  const northRise = 46 * smoothRamp(Math.max(0, normalizedAlong), 1.28);
-  const southRoll = 28 * smoothRamp(Math.max(0, -normalizedAlong), 1.18);
-  const glacialBench = -24 * Math.exp(-Math.pow((across + 145) / 105, 2)) * Math.exp(-Math.pow((along - 120) / 420, 2));
-  const windLip = 21 * Math.exp(-Math.pow((across - 215) / 58, 2)) * Math.exp(-Math.pow((along + 160) / 330, 2));
-
-  const gullies =
-    -18 * gully(across + 245 + 18 * Math.sin(along * 0.018), along, -160, 250) +
-    -14 * gully(across - 285 + 16 * Math.cos(along * 0.016), along, 110, 300) +
-    -10 * gully(across + 30, along, 220, 360);
-
-  const ridgeRoughness =
-    9.5 * fbm(xMetersEast * 0.011, zMetersNorth * 0.011, 5) * Math.min(1, normalizedAcross * 1.35) +
-    4.2 * fbm(xMetersEast * 0.027 + 17, zMetersNorth * 0.027 - 9, 4);
-
-  const passFloorUndulation =
-    5.5 * Math.sin((along + 120) * 0.013) * Math.exp(-Math.pow(across / 250, 2)) +
-    3.8 * Math.cos((xMetersEast - zMetersNorth) * 0.009);
-
-  return (
-    saddle +
-    westWall +
-    eastWall +
-    northRise +
-    southRoll +
-    glacialBench +
-    windLip +
-    gullies +
-    ridgeRoughness +
-    passFloorUndulation -
-    18
-  );
-}
-
-export function renderHeightMetersAt(xMetersEast, zMetersNorth) {
-  return terrainElevationMetersAt(xMetersEast, zMetersNorth) * VERTICAL_EXAGGERATION;
-}
-
-export function addThompsonPassSnowTopoWorld(scene, options = {}) {
+export function addIranMesrDesertTopoWorld(scene, options = {}) {
   scene.name = CONFIG.name;
 
   if (options.fog !== false) {
@@ -217,9 +172,10 @@ export function addThompsonPassSnowTopoWorld(scene, options = {}) {
 
   const terrainData = buildTerrainData();
   addTerrain(scene, terrainData);
-  addWindPackedSnowfields(scene);
   addRockOutcrops(scene);
-  addSnowToppedPineTrees(scene);
+  addSparseDesertShrubs(scene);
+  addPricklyPearCacti(scene);
+  addFogBoundaryPlane(scene);
   applyRadialFogToScene(scene);
 
   return {
@@ -227,6 +183,40 @@ export function addThompsonPassSnowTopoWorld(scene, options = {}) {
     terrainData,
     centerHeightMeters: renderHeightMetersAt(0, 0),
   };
+}
+
+export function terrainElevationMetersAt(xMetersEast, zMetersNorth) {
+  const { u, v } = desertFrame(xMetersEast, zMetersNorth);
+  const phase = dunePhaseAt(u, v);
+  const duneEnvelope = duneFieldEnvelopeAt(u, v);
+  const primaryWave = Math.sin(phase);
+  const secondaryWave = Math.sin(phase * 0.58 + v * 0.004 + 1.35);
+  const crossRipple = Math.sin(u * 0.014 - v * 0.018 + 0.8);
+  const valleyScore = duneValleyScoreAt(xMetersEast, zMetersNorth);
+
+  const basinTilt = 0.0018 * zMetersNorth - 0.0008 * xMetersEast;
+  const rollingDunes =
+    duneEnvelope *
+    (3.8 * primaryWave +
+      1.7 * secondaryWave +
+      0.75 * crossRipple +
+      1.1 * Math.pow(Math.max(0, primaryWave), 2.1));
+  const interduneSwales = -1.6 * valleyScore;
+  const broadSandSheet =
+    1.45 * Math.sin((u + 180) * 0.006) * Math.exp(-Math.pow(v / 730, 2)) +
+    1.05 * fbm(xMetersEast * 0.004 + 12, zMetersNorth * 0.004 - 3, 4);
+  const softDryWashes =
+    -0.9 * desertWash(u + 165 + 18 * Math.sin(v * 0.008), v, -160, 450) +
+    -0.65 * desertWash(u - 215 + 14 * Math.cos(v * 0.009), v, 160, 390);
+  const fineSandTexture =
+    0.26 * fbm(xMetersEast * 0.019 + 19, zMetersNorth * 0.019 - 7, 4) +
+    0.14 * fbm(u * 0.046 - 4, v * 0.046 + 23, 3);
+
+  return basinTilt + rollingDunes + interduneSwales + broadSandSheet + softDryWashes + fineSandTexture - 3.2;
+}
+
+export function renderHeightMetersAt(xMetersEast, zMetersNorth) {
+  return terrainElevationMetersAt(xMetersEast, zMetersNorth) * VERTICAL_EXAGGERATION;
 }
 
 export function terrainNormalAt(xMetersEast, zMetersNorth, sampleMeters = 4.5) {
@@ -251,16 +241,50 @@ export function metersToLatLon(xMetersEast, zMetersNorth) {
   };
 }
 
-function valleyAxisAt(zMetersNorth) {
-  return 34 * Math.sin(zMetersNorth * 0.0075) - 18 * Math.sin(zMetersNorth * 0.017);
+function desertFrame(xMetersEast, zMetersNorth) {
+  const angle = THREE.MathUtils.degToRad(-18);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+
+  return {
+    u: xMetersEast * cos - zMetersNorth * sin,
+    v: xMetersEast * sin + zMetersNorth * cos,
+  };
+}
+
+function fromDesertFrame(u, v) {
+  const angle = THREE.MathUtils.degToRad(-18);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+
+  return {
+    x: u * cos + v * sin,
+    z: -u * sin + v * cos,
+  };
+}
+
+function dunePhaseAt(u, v) {
+  const windWander = 34 * fbm(v * 0.0035 + 9, u * 0.002 - 13, 4);
+  return (u + windWander) * 0.027 + v * 0.0055;
+}
+
+function duneFieldEnvelopeAt(u, v) {
+  return Math.exp(-Math.pow(u / 610, 2)) * Math.exp(-Math.pow(v / 780, 2));
+}
+
+function duneValleyScoreAt(xMetersEast, zMetersNorth) {
+  const { u, v } = desertFrame(xMetersEast, zMetersNorth);
+  const phase = dunePhaseAt(u, v);
+  const swale = Math.max(0, -Math.sin(phase));
+  return Math.pow(swale, 2.4) * duneFieldEnvelopeAt(u, v);
 }
 
 function addLighting(scene) {
-  const hemisphere = new THREE.HemisphereLight(0xf4f8fb, 0x75818a, 1.65);
+  const hemisphere = new THREE.HemisphereLight(0xfff0d8, 0x8a6f52, 1.72);
   scene.add(hemisphere);
 
-  const sun = new THREE.DirectionalLight(0xfff5dc, 2.65);
-  sun.position.set(-460, 740, 280);
+  const sun = new THREE.DirectionalLight(0xffd18e, 2.95);
+  sun.position.set(-520, 780, 220);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -760;
@@ -295,7 +319,7 @@ function buildTerrainData() {
       const elevation = terrainElevationMetersAt(x, z);
       const y = elevation * VERTICAL_EXAGGERATION;
       const slope = terrainSlopeAt(x, z);
-      const color = snowColorAt(x, z, elevation, slope);
+      const color = desertColorAt(x, z, elevation, slope);
 
       positions[positionIndex++] = x;
       positions[positionIndex++] = y;
@@ -350,7 +374,7 @@ function addTerrain(scene, terrainData) {
   });
 
   const terrain = new THREE.Mesh(geometry, material);
-  terrain.name = "1 km square snow-blanketed topographic terrain";
+  terrain.name = "1 km square Iranian desert topographic terrain";
   terrain.receiveShadow = true;
   scene.add(terrain);
 }
@@ -454,358 +478,280 @@ function createLineSegments(positions, material, name) {
   return lines;
 }
 
-function addSnowCoveredPassTrace(scene) {
-  const points = [];
-
-  for (let i = 0; i <= 30; i += 1) {
-    const z = THREE.MathUtils.lerp(-520, 520, i / 30);
-    const x = 22 * Math.sin(z * 0.009) - 16 * Math.sin(z * 0.018);
-    points.push(new THREE.Vector2(x, z));
-  }
-
-  const trace = new THREE.Mesh(createRibbonGeometry(points, 32, 0.62), MATERIALS.snowRoad);
-  trace.name = "subtle snow-covered pass trace";
-  trace.receiveShadow = true;
-  scene.add(trace);
-}
-
-function addWindPackedSnowfields(scene) {
-  const snowfields = [
-    { x: -190, z: -155, width: 210, depth: 72, rotation: -0.42, opacity: 0.58 },
-    { x: 245, z: 170, width: 260, depth: 78, rotation: 0.32, opacity: 0.5 },
-    { x: -55, z: 280, width: 180, depth: 56, rotation: -0.1, opacity: 0.44 },
-    { x: 160, z: -330, width: 160, depth: 50, rotation: 0.16, opacity: 0.42 },
+function addDryWashChannels(scene) {
+  const channels = [
+    { offset: -132, width: 27, yOffset: 0.58, material: MATERIALS.washFloor },
+    { offset: 214, width: 21, yOffset: 0.54, material: MATERIALS.washFloor },
+    { offset: 32, width: 15, yOffset: 0.5, material: MATERIALS.washFloor },
   ];
 
-  for (const field of snowfields) {
-    const mesh = createSnowfield(field);
-    scene.add(mesh);
+  for (const channel of channels) {
+    const points = [];
+
+    for (let i = 0; i <= 34; i += 1) {
+      const v = THREE.MathUtils.lerp(-520, 520, i / 34);
+      const u = channel.offset + 18 * Math.sin(v * 0.013 + channel.offset * 0.02);
+      const world = fromDesertFrame(u, v);
+      points.push(new THREE.Vector2(world.x, world.z));
+    }
+
+    const trace = new THREE.Mesh(createRibbonGeometry(points, channel.width, channel.yOffset), channel.material);
+    trace.name = "dry ephemeral wash channel";
+    trace.receiveShadow = true;
+    scene.add(trace);
   }
 }
 
-function createSnowfield(field) {
-  const xSegments = 14;
-  const zSegments = 5;
-  const positions = [];
-  const indices = [];
+function addDuneCrestLines(scene) {
+  const segments = [];
 
-  for (let zIndex = 0; zIndex <= zSegments; zIndex += 1) {
-    const localZ = THREE.MathUtils.lerp(-field.depth / 2, field.depth / 2, zIndex / zSegments);
+  for (let ridge = -4; ridge <= 5; ridge += 1) {
+    let previous = null;
 
-    for (let xIndex = 0; xIndex <= xSegments; xIndex += 1) {
-      const localX = THREE.MathUtils.lerp(-field.width / 2, field.width / 2, xIndex / xSegments);
-      const world = rotateAndTranslate(localX, localZ, field.x, field.z, field.rotation);
-      positions.push(world.x, renderHeightMetersAt(world.x, world.z) + 0.85, world.z);
+    for (let i = 0; i <= 48; i += 1) {
+      const v = THREE.MathUtils.lerp(-420, 520, i / 48);
+      const u = 40 + ridge * 112 + 18 * Math.sin(v * 0.009 + ridge * 0.6);
+      const world = fromDesertFrame(u, v);
+
+      if (Math.abs(world.x) > HALF_TERRAIN - 30 || Math.abs(world.z) > HALF_TERRAIN - 30) {
+        previous = null;
+        continue;
+      }
+
+      const current = {
+        x: world.x,
+        y: renderHeightMetersAt(world.x, world.z) + 1.65,
+        z: world.z,
+      };
+
+      if (previous) {
+        segments.push(previous.x, previous.y, previous.z, current.x, current.y, current.z);
+      }
+
+      previous = current;
     }
   }
 
-  for (let zIndex = 0; zIndex < zSegments; zIndex += 1) {
-    for (let xIndex = 0; xIndex < xSegments; xIndex += 1) {
-      const rowWidth = xSegments + 1;
-      const a = zIndex * rowWidth + xIndex;
-      const b = a + 1;
-      const c = a + rowWidth;
-      const d = c + 1;
-      indices.push(a, c, b, b, c, d);
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-
-  const material = new THREE.MeshStandardMaterial({
-    color: 0xf4f7f5,
-    roughness: 0.92,
-    metalness: 0,
-    transparent: true,
-    opacity: field.opacity,
-    depthWrite: false,
-  });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = "wind-packed snowfield overlay";
-  mesh.receiveShadow = true;
-  return mesh;
+  const crests = createLineSegments(segments, MATERIALS.duneCrest, "wind-formed dune crest lines");
+  scene.add(crests);
 }
 
 function addRockOutcrops(scene) {
   const random = mulberry32(SEED + 910);
-  const geometry = new THREE.DodecahedronGeometry(1, 0);
+  const geometry = new THREE.CylinderGeometry(1, 1, 1, 8);
   const matrices = [];
   const dummy = new THREE.Object3D();
-  const targetCount = 118;
+  const targetCount = 16;
   let attempts = 0;
 
-  while (matrices.length < targetCount && attempts < targetCount * 18) {
+  while (matrices.length < targetCount && attempts < targetCount * 120) {
     attempts += 1;
 
-    const valleyBiased = random() < 0.58;
-    const z = randomRange(random, -HALF_TERRAIN + 22, HALF_TERRAIN - 22);
-    const x = valleyBiased
-      ? valleyAxisAt(z) + randomRange(random, -190, 190)
-      : randomRange(random, -HALF_TERRAIN + 22, HALF_TERRAIN - 22);
+    const x = randomRange(random, -HALF_TERRAIN + 24, HALF_TERRAIN - 24);
+    const z = randomRange(random, -HALF_TERRAIN + 24, HALF_TERRAIN - 24);
+    const valleyScore = duneValleyScoreAt(x, z);
+
+    if (valleyScore < 0.62) continue;
+
     const slope = terrainSlopeAt(x, z);
-    const elevation = terrainElevationMetersAt(x, z);
-    const across = Math.abs(x - valleyAxisAt(z));
-    const valleyProximity = Math.exp(-Math.pow(across / 165, 2));
-    const relativeHeight = THREE.MathUtils.clamp((elevation + 45) / 235, 0, 1);
 
-    if (!valleyBiased && slope < 0.22 && random() < 0.75) {
-      continue;
-    }
-
-    if (across < 34 && random() < 0.58) {
-      continue;
-    }
+    if (slope > 0.11) continue;
+    if (fbm(x * 0.018 + 5, z * 0.018 - 11, 3) < 0.48) continue;
 
     const y = renderHeightMetersAt(x, z);
-    const valleyBoulderScale = randomRange(random, 3.2, 7.4) * valleyProximity * (1 - relativeHeight * 0.48);
-    const highOutcropScale = randomRange(random, 0.45, 2.35) * (0.72 + slope * 1.1);
-    const scale = Math.max(0.7, valleyBoulderScale + highOutcropScale * (0.42 + relativeHeight * 0.72));
-    const longAxis = randomRange(random, 0.75, 1.85) * (1 + valleyProximity * 0.42);
-    const heightAxis = randomRange(random, 0.18, 0.52) * (1 - valleyProximity * 0.16);
-    const depthAxis = randomRange(random, 0.58, 1.5) * (1 + slope * 0.45);
+    const longAxis = randomRange(random, 2.6, 7.2);
+    const heightAxis = randomRange(random, 0.08, 0.22);
+    const depthAxis = randomRange(random, 1.2, 3.8);
 
-    dummy.position.set(x, y + scale * 0.2, z);
-    dummy.rotation.set(random() * Math.PI, random() * Math.PI, random() * Math.PI);
-    dummy.scale.set(scale * longAxis, scale * heightAxis, scale * depthAxis);
+    dummy.position.set(x, y + heightAxis / 2 + 0.08, z);
+    dummy.rotation.set(randomRange(random, -0.045, 0.045), randomRange(random, 0, Math.PI * 2), randomRange(random, -0.045, 0.045));
+    dummy.scale.set(longAxis, heightAxis, depthAxis);
     dummy.updateMatrix();
     matrices.push(dummy.matrix.clone());
   }
 
   const rocks = new THREE.InstancedMesh(geometry, MATERIALS.rock, matrices.length);
-  rocks.name = "wind-scoured rock outcrops";
+  rocks.name = "sparse flat stones in interdune valley bottoms";
   rocks.castShadow = true;
   rocks.receiveShadow = true;
   matrices.forEach((matrix, index) => rocks.setMatrixAt(index, matrix));
   scene.add(rocks);
 }
 
-function addSnowToppedPineTrees(scene) {
+function addSparseDesertShrubs(scene) {
   const random = mulberry32(SEED + 1204);
-  const trunkGeometry = new THREE.CylinderGeometry(1, 1, 1, 6);
-  const crownGeometry = new THREE.ConeGeometry(1, 1, 8);
-  const trunkMatrices = [];
-  const lowerNeedleMatrices = [];
-  const middleNeedleMatrices = [];
-  const upperNeedleMatrices = [];
-  const lowerSnowMatrices = [];
-  const middleSnowMatrices = [];
-  const upperSnowMatrices = [];
+  const tuftGeometry = new THREE.ConeGeometry(1, 1, 7);
+  const matrices = [];
   const dummy = new THREE.Object3D();
-  const clusters = [
-    { z: -410, lateral: -76, radiusX: 38, radiusZ: 58, count: 15 },
-    { z: -350, lateral: 68, radiusX: 46, radiusZ: 66, count: 19 },
-    { z: -275, lateral: -112, radiusX: 34, radiusZ: 50, count: 13 },
-    { z: -210, lateral: 88, radiusX: 52, radiusZ: 70, count: 22 },
-    { z: -118, lateral: -70, radiusX: 44, radiusZ: 64, count: 18 },
-    { z: -36, lateral: 78, radiusX: 52, radiusZ: 76, count: 24 },
-    { z: 60, lateral: -92, radiusX: 42, radiusZ: 62, count: 17 },
-    { z: 144, lateral: 72, radiusX: 44, radiusZ: 60, count: 18 },
-    { z: 238, lateral: -68, radiusX: 36, radiusZ: 56, count: 13 },
-    { z: 330, lateral: 82, radiusX: 42, radiusZ: 58, count: 15 },
-  ];
+  const targetCount = 38;
+  let attempts = 0;
 
-  for (const cluster of clusters) {
-    let planted = 0;
-    let attempts = 0;
+  while (matrices.length < targetCount && attempts < targetCount * 22) {
+    attempts += 1;
 
-    while (planted < cluster.count && attempts < cluster.count * 22) {
-      attempts += 1;
+    const x = randomRange(random, -HALF_TERRAIN + 34, HALF_TERRAIN - 34);
+    const z = randomRange(random, -HALF_TERRAIN + 34, HALF_TERRAIN - 34);
+    const { u, v } = desertFrame(x, z);
+    const slope = terrainSlopeAt(x, z);
+    const valleyScore = duneValleyScoreAt(x, z);
+    const washBias =
+      Math.exp(-Math.pow((u + 165) / 70, 2)) +
+      Math.exp(-Math.pow((u - 215) / 66, 2));
+    const survivalNoise = fbm(x * 0.018 + 31, z * 0.018 - 18, 4);
 
-      const radius = Math.sqrt(random());
-      const angle = randomRange(random, 0, Math.PI * 2);
-      const z = cluster.z + Math.sin(angle) * cluster.radiusZ * radius + randomRange(random, -8, 8);
-      const x =
-        valleyAxisAt(z) +
-        cluster.lateral +
-        Math.cos(angle) * cluster.radiusX * radius +
-        randomRange(random, -7, 7);
+    if (slope > 0.22) continue;
+    if (valleyScore < 0.16 && washBias < 0.22) continue;
+    if (survivalNoise < 0.52) continue;
 
-      if (Math.abs(x) > HALF_TERRAIN - 28 || Math.abs(z) > HALF_TERRAIN - 28) continue;
+    const ground = renderHeightMetersAt(x, z);
+    const height = randomRange(random, 0.35, 1.05);
+    const radius = randomRange(random, 0.34, 0.95);
 
-      const elevation = terrainElevationMetersAt(x, z);
-      const slope = terrainSlopeAt(x, z);
-      const across = Math.abs(x - valleyAxisAt(z));
-      const shelterNoise = fbm(x * 0.014 + 31, z * 0.014 - 18, 4);
-
-      if (across < 34 || across > 168) continue;
-      if (elevation > 52) continue;
-      if (slope > 0.36) continue;
-      if (shelterNoise < 0.2 && random() < 0.72) continue;
-
-      plantSnowToppedPine(
-        dummy,
-        random,
-        x,
-        z,
-        elevation,
-        trunkMatrices,
-        lowerNeedleMatrices,
-        middleNeedleMatrices,
-        upperNeedleMatrices,
-        lowerSnowMatrices,
-        middleSnowMatrices,
-        upperSnowMatrices,
-      );
-      planted += 1;
-    }
+    setMatrix(
+      dummy,
+      x,
+      ground + height / 2 + 0.1,
+      z,
+      randomRange(random, 0, Math.PI * 2),
+      randomRange(random, -0.12, 0.12),
+      randomRange(random, -0.12, 0.12),
+      radius,
+      height,
+      radius,
+    );
+    matrices.push(dummy.matrix.clone());
   }
 
-  const trunks = new THREE.InstancedMesh(trunkGeometry, MATERIALS.pineTrunk, trunkMatrices.length);
-  trunks.name = "snow-topped pine trunks";
-  trunks.castShadow = true;
-  trunks.receiveShadow = true;
-  trunkMatrices.forEach((matrix, index) => trunks.setMatrixAt(index, matrix));
-  scene.add(trunks);
-
-  addTreeInstancedMesh(scene, crownGeometry, MATERIALS.pineNeedles, lowerNeedleMatrices, "lower green pine needles");
-  addTreeInstancedMesh(scene, crownGeometry, MATERIALS.pineNeedles, middleNeedleMatrices, "middle green pine needles");
-  addTreeInstancedMesh(scene, crownGeometry, MATERIALS.pineNeedles, upperNeedleMatrices, "upper green pine needles");
-  addTreeInstancedMesh(scene, crownGeometry, MATERIALS.pineSnow, lowerSnowMatrices, "lower snow caps on pine branches");
-  addTreeInstancedMesh(scene, crownGeometry, MATERIALS.pineSnow, middleSnowMatrices, "middle snow caps on pine branches");
-  addTreeInstancedMesh(scene, crownGeometry, MATERIALS.pineSnow, upperSnowMatrices, "upper snow caps on pine branches");
+  const shrubs = new THREE.InstancedMesh(tuftGeometry, MATERIALS.dryShrub, matrices.length);
+  shrubs.name = "sparse desert shrub tufts";
+  shrubs.castShadow = true;
+  shrubs.receiveShadow = true;
+  matrices.forEach((matrix, index) => shrubs.setMatrixAt(index, matrix));
+  scene.add(shrubs);
 }
 
-function plantSnowToppedPine(
-  dummy,
-  random,
-  x,
-  z,
-  elevation,
-  trunkMatrices,
-  lowerNeedleMatrices,
-  middleNeedleMatrices,
-  upperNeedleMatrices,
-  lowerSnowMatrices,
-  middleSnowMatrices,
-  upperSnowMatrices,
-) {
-  const ground = renderHeightMetersAt(x, z);
-  const heightPenalty = THREE.MathUtils.clamp((elevation - 12) / 95, 0, 0.36);
-  const heightT = Math.pow(random(), 0.72);
-  const totalHeight = THREE.MathUtils.lerp(5.4, 18.8, heightT) * (1 - heightPenalty);
-  const crownSpread = randomRange(random, 0.78, 1.34) * (1 - heightPenalty * 0.18);
-  const crownOvalX = randomRange(random, 0.78, 1.28);
-  const crownOvalZ = randomRange(random, 0.76, 1.24);
-  const layerJitter = totalHeight * randomRange(random, 0.008, 0.03);
-  const trunkHeight = totalHeight * randomRange(random, 0.18, 0.34);
-  const trunkRadius = THREE.MathUtils.clamp(totalHeight * randomRange(random, 0.032, 0.052), 0.24, 0.82);
-  const trunkOval = randomRange(random, 0.82, 1.18);
-  const yaw = randomRange(random, 0, Math.PI * 2);
-  const leanDirection = randomRange(random, 0, Math.PI * 2);
-  const leanMagnitude = randomRange(random, 0.01, 0.065) * (1 + heightPenalty * 0.5);
-  const leanX = Math.cos(leanDirection) * leanMagnitude;
-  const leanZ = Math.sin(leanDirection) * leanMagnitude;
+function addPricklyPearCacti(scene) {
+  const random = mulberry32(SEED + 2026);
+  const padGeometry = new THREE.SphereGeometry(1, 14, 10);
+  const areoleGeometry = new THREE.SphereGeometry(1, 5, 4);
+  const padMatrices = [];
+  const areoleMatrices = [];
+  const dummy = new THREE.Object3D();
+  const targetCount = 46;
+  let attempts = 0;
 
-  setMatrix(
-    dummy,
-    x,
-    ground + trunkHeight / 2,
-    z,
-    yaw,
-    leanX,
-    leanZ,
-    trunkRadius * trunkOval,
-    trunkHeight,
-    trunkRadius / trunkOval,
-  );
-  trunkMatrices.push(dummy.matrix.clone());
+  while (padMatrices.length < targetCount * 3 && attempts < targetCount * 32) {
+    attempts += 1;
 
-  const lowerRadius = totalHeight * randomRange(random, 0.135, 0.225) * crownSpread;
-  const lowerRadiusX = lowerRadius * crownOvalX * randomRange(random, 0.88, 1.16);
-  const lowerRadiusZ = lowerRadius * crownOvalZ * randomRange(random, 0.86, 1.18);
-  const lowerSnowRadiusFactor = randomRange(random, 0.78, 0.94);
+    const x = randomRange(random, -HALF_TERRAIN + 42, HALF_TERRAIN - 42);
+    const z = randomRange(random, -HALF_TERRAIN + 42, HALF_TERRAIN - 42);
+    const slope = terrainSlopeAt(x, z);
+    const valleyScore = duneValleyScoreAt(x, z);
+    const survivalNoise = fbm(x * 0.011 - 21, z * 0.011 + 8, 4);
 
-  const middleRadius = totalHeight * randomRange(random, 0.095, 0.165) * crownSpread;
-  const middleRadiusX = Math.min(
-    middleRadius * crownOvalX * randomRange(random, 0.82, 1.18),
-    lowerRadiusX * randomRange(random, 0.48, 0.68),
-    lowerRadiusX * lowerSnowRadiusFactor * randomRange(random, 0.76, 0.92),
-  );
-  const middleRadiusZ = Math.min(
-    middleRadius * crownOvalZ * randomRange(random, 0.84, 1.18),
-    lowerRadiusZ * randomRange(random, 0.48, 0.68),
-    lowerRadiusZ * lowerSnowRadiusFactor * randomRange(random, 0.76, 0.92),
-  );
-  const middleSnowRadiusFactor = randomRange(random, 0.78, 0.94);
+    if (slope > 0.24) continue;
+    if (survivalNoise < 0.24 && valleyScore < 0.28) continue;
 
-  const upperRadius = totalHeight * randomRange(random, 0.062, 0.125) * crownSpread;
-  const upperRadiusX = Math.min(
-    upperRadius * crownOvalX * randomRange(random, 0.76, 1.22),
-    middleRadiusX * randomRange(random, 0.46, 0.68),
-    middleRadiusX * middleSnowRadiusFactor * randomRange(random, 0.76, 0.92),
-  );
-  const upperRadiusZ = Math.min(
-    upperRadius * crownOvalZ * randomRange(random, 0.78, 1.22),
-    middleRadiusZ * randomRange(random, 0.46, 0.68),
-    middleRadiusZ * middleSnowRadiusFactor * randomRange(random, 0.76, 0.92),
-  );
+    const ground = renderHeightMetersAt(x, z);
+    const yaw = randomRange(random, 0, Math.PI * 2);
+    const size = randomRange(random, 0.55, 0.9);
 
-  const layers = [
+    plantPricklyPearCactus(dummy, random, x, ground, z, yaw, size, padMatrices, areoleMatrices);
+  }
+
+  const pads = new THREE.InstancedMesh(padGeometry, MATERIALS.cactusPad, padMatrices.length);
+  pads.name = "prickly pear cactus oval pads";
+  pads.castShadow = true;
+  pads.receiveShadow = true;
+  padMatrices.forEach((matrix, index) => pads.setMatrixAt(index, matrix));
+  scene.add(pads);
+
+  const areoles = new THREE.InstancedMesh(areoleGeometry, MATERIALS.cactusAreole, areoleMatrices.length);
+  areoles.name = "pale prickly pear areoles";
+  areoles.castShadow = true;
+  areoleMatrices.forEach((matrix, index) => areoles.setMatrixAt(index, matrix));
+  scene.add(areoles);
+}
+
+function plantPricklyPearCactus(dummy, random, x, ground, z, yaw, size, padMatrices, areoleMatrices) {
+  const baseHeight = randomRange(random, 0.9, 1.65) * size;
+  const baseWidth = baseHeight * randomRange(random, 0.38, 0.52);
+  const baseThickness = randomRange(random, 0.1, 0.18) * size;
+  const padPlan = [
     {
-      bottom: ground + trunkHeight * randomRange(random, 0.3, 0.56),
-      height: totalHeight * randomRange(random, 0.43, 0.58),
-      radiusX: lowerRadiusX,
-      radiusZ: lowerRadiusZ,
-      snowHeight: totalHeight * randomRange(random, 0.13, 0.25),
-      snowRadiusFactor: lowerSnowRadiusFactor,
-      yawOffset: randomRange(random, -0.28, 0.28),
-      offsetX: randomRange(random, -layerJitter, layerJitter),
-      offsetZ: randomRange(random, -layerJitter, layerJitter),
-    },
-    {
-      bottom: ground + trunkHeight + totalHeight * randomRange(random, 0.08, 0.18),
-      height: totalHeight * randomRange(random, 0.34, 0.48),
-      radiusX: middleRadiusX,
-      radiusZ: middleRadiusZ,
-      snowHeight: totalHeight * randomRange(random, 0.12, 0.23),
-      snowRadiusFactor: middleSnowRadiusFactor,
-      yawOffset: randomRange(random, -0.35, 0.35),
-      offsetX: randomRange(random, -layerJitter, layerJitter),
-      offsetZ: randomRange(random, -layerJitter, layerJitter),
-    },
-    {
-      bottom: ground + trunkHeight + totalHeight * randomRange(random, 0.28, 0.4),
-      height: totalHeight * randomRange(random, 0.28, 0.42),
-      radiusX: upperRadiusX,
-      radiusZ: upperRadiusZ,
-      snowHeight: totalHeight * randomRange(random, 0.11, 0.22),
-      snowRadiusFactor: randomRange(random, 0.76, 0.9),
-      yawOffset: randomRange(random, -0.42, 0.42),
-      offsetX: randomRange(random, -layerJitter, layerJitter),
-      offsetZ: randomRange(random, -layerJitter, layerJitter),
+      offsetX: 0,
+      offsetY: baseHeight * 0.52,
+      offsetZ: 0,
+      width: baseWidth,
+      height: baseHeight,
+      thickness: baseThickness,
+      tiltX: randomRange(random, -0.08, 0.08),
+      tiltZ: randomRange(random, -0.1, 0.1),
     },
   ];
 
-  addTreeLayerMatrix(dummy, lowerNeedleMatrices, lowerSnowMatrices, layers[0], x, z, yaw, leanX, leanZ);
-  addTreeLayerMatrix(dummy, middleNeedleMatrices, middleSnowMatrices, layers[1], x, z, yaw, leanX, leanZ);
-  addTreeLayerMatrix(dummy, upperNeedleMatrices, upperSnowMatrices, layers[2], x, z, yaw, leanX, leanZ);
+  const sideCount = 1 + Math.floor(random() * 2);
+  for (let i = 0; i < sideCount; i += 1) {
+    const side = i % 2 === 0 ? -1 : 1;
+    const height = baseHeight * randomRange(random, 0.54, 0.78);
+    const width = height * randomRange(random, 0.4, 0.55);
+    padPlan.push({
+      offsetX: side * baseWidth * randomRange(random, 0.42, 0.64),
+      offsetY: baseHeight * randomRange(random, 0.76, 1.02),
+      offsetZ: randomRange(random, -0.26, 0.26) * size,
+      width,
+      height,
+      thickness: baseThickness * randomRange(random, 0.78, 1.08),
+      tiltX: randomRange(random, -0.18, 0.16),
+      tiltZ: side * randomRange(random, 0.22, 0.46),
+    });
+  }
+
+  for (const pad of padPlan) {
+    addCactusPadMatrix(dummy, padMatrices, x, ground, z, yaw, pad);
+    addCactusAreoleMatrices(dummy, random, areoleMatrices, x, ground, z, yaw, pad);
+  }
 }
 
-function addTreeLayerMatrix(dummy, needleMatrices, snowMatrices, layer, x, z, yaw, leanX, leanZ) {
-  const layerX = x + layer.offsetX;
-  const layerZ = z + layer.offsetZ;
-  const layerYaw = yaw + layer.yawOffset;
-  const centerY = layer.bottom + layer.height / 2;
-  setMatrix(dummy, layerX, centerY, layerZ, layerYaw, leanX, leanZ, layer.radiusX, layer.height, layer.radiusZ);
-  needleMatrices.push(dummy.matrix.clone());
-
-  const snowY = layer.bottom + layer.height - layer.snowHeight / 2 + 0.04;
-  const snowRadiusX = layer.radiusX * layer.snowRadiusFactor;
-  const snowRadiusZ = layer.radiusZ * layer.snowRadiusFactor;
-  setMatrix(dummy, layerX, snowY, layerZ, layerYaw, leanX, leanZ, snowRadiusX, layer.snowHeight, snowRadiusZ);
-  snowMatrices.push(dummy.matrix.clone());
+function addCactusPadMatrix(dummy, matrices, x, ground, z, yaw, pad) {
+  const world = offsetInYawFrame(x, z, yaw, pad.offsetX, pad.offsetZ);
+  dummy.position.set(world.x, ground + pad.offsetY, world.z);
+  dummy.rotation.set(pad.tiltX, yaw, pad.tiltZ);
+  dummy.scale.set(pad.width / 2, pad.height / 2, pad.thickness);
+  dummy.updateMatrix();
+  matrices.push(dummy.matrix.clone());
 }
 
-function addTreeInstancedMesh(scene, geometry, material, matrices, name) {
-  const mesh = new THREE.InstancedMesh(geometry, material, matrices.length);
-  mesh.name = name;
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  matrices.forEach((matrix, index) => mesh.setMatrixAt(index, matrix));
-  scene.add(mesh);
+function addCactusAreoleMatrices(dummy, random, matrices, x, ground, z, yaw, pad) {
+  const dotCount = 5;
+
+  for (let i = 0; i < dotCount; i += 1) {
+    const localX = randomRange(random, -0.42, 0.42) * pad.width;
+    const localY = randomRange(random, -0.34, 0.36) * pad.height;
+    const localZ = pad.thickness * 1.04;
+
+    if (Math.pow(localX / (pad.width / 2), 2) + Math.pow(localY / (pad.height / 2), 2) > 0.74) {
+      continue;
+    }
+
+    const world = offsetInYawFrame(x, z, yaw, pad.offsetX + localX, pad.offsetZ + localZ);
+    const radius = randomRange(random, 0.035, 0.065);
+    dummy.position.set(world.x, ground + pad.offsetY + localY, world.z);
+    dummy.rotation.set(0, yaw, 0);
+    dummy.scale.set(radius, radius, radius);
+    dummy.updateMatrix();
+    matrices.push(dummy.matrix.clone());
+  }
+}
+
+function offsetInYawFrame(originX, originZ, yaw, localX, localZ) {
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+
+  return {
+    x: originX + localX * cos - localZ * sin,
+    z: originZ + localX * sin + localZ * cos,
+  };
 }
 
 function setMatrix(dummy, x, y, z, yaw, leanX, leanZ, scaleX, scaleY, scaleZ) {
@@ -824,7 +770,7 @@ function addFogBoundaryPlane(scene) {
   const plane = new THREE.Mesh(geometry, material);
   plane.name = "low-detail fog boundary outside 1 km terrain";
   plane.rotation.x = -Math.PI / 2;
-  plane.position.y = -92;
+  plane.position.y = -24;
   scene.add(plane);
 }
 
@@ -936,24 +882,23 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, radialFogColor, radialFogAmount);`,
   material.needsUpdate = true;
 }
 
-function snowColorAt(x, z, elevation, slope) {
-  const normalizedElevation = THREE.MathUtils.clamp((elevation + 52) / 245, 0, 1);
+function desertColorAt(x, z, elevation, slope) {
+  const normalizedElevation = THREE.MathUtils.clamp((elevation + 38) / 76, 0, 1);
+  const valleyScore = duneValleyScoreAt(x, z);
   const windNoise = fbm(x * 0.018 - 7, z * 0.018 + 13, 4);
-  const driftNoise = fbm(x * 0.006 + 22, z * 0.006 - 4, 5);
-  const base = new THREE.Color(0xe5ecec);
-  const highSnow = new THREE.Color(0xf8fbf8);
-  const blueShadow = new THREE.Color(0xb5c5cc);
-  const windScour = new THREE.Color(0x9ea8aa);
-  const exposedRock = new THREE.Color(0x6f7472);
+  const fineNoise = fbm(x * 0.043 + 22, z * 0.043 - 4, 4);
 
-  base.lerp(highSnow, normalizedElevation * 0.45 + driftNoise * 0.15);
-  base.lerp(blueShadow, THREE.MathUtils.clamp(slope * 0.42, 0, 0.34));
+  const base = new THREE.Color(0xdcae6c);
+  const duneGold = new THREE.Color(0xf2cc82);
+  const crestSand = new THREE.Color(0xefbd70);
+  const interduneFlat = new THREE.Color(0xd6be96);
+  const slopeShadow = new THREE.Color(0xa88661);
 
-  if (slope > 0.55 && windNoise > 0.57) {
-    base.lerp(exposedRock, THREE.MathUtils.clamp((slope - 0.45) * 1.6, 0.18, 0.48));
-  } else if (windNoise > 0.66) {
-    base.lerp(windScour, 0.16);
-  }
+  base.lerp(duneGold, THREE.MathUtils.clamp((windNoise - 0.18) * 0.35, 0, 0.24));
+  base.lerp(crestSand, normalizedElevation * 0.22);
+  base.lerp(interduneFlat, THREE.MathUtils.clamp(valleyScore * 0.46, 0, 0.46));
+  base.lerp(slopeShadow, THREE.MathUtils.clamp(slope * 0.36, 0, 0.24));
+  base.offsetHSL(0, 0, (fineNoise - 0.5) * 0.035);
 
   return base;
 }
@@ -995,9 +940,9 @@ function createRibbonGeometry(points, width, yOffset = 0.25) {
   return geometry;
 }
 
-function gully(across, along, alongCenter, alongScale) {
+function desertWash(across, along, alongCenter, alongScale) {
   return (
-    Math.exp(-Math.pow(across / 38, 2)) *
+    Math.exp(-Math.pow(across / 34, 2)) *
     Math.exp(-Math.pow((along - alongCenter) / alongScale, 2))
   );
 }
@@ -1005,16 +950,6 @@ function gully(across, along, alongCenter, alongScale) {
 function smoothRamp(value, exponent = 1) {
   const clamped = THREE.MathUtils.clamp(value, 0, 1.4);
   return Math.pow(clamped, exponent);
-}
-
-function rotateAndTranslate(localX, localZ, centerX, centerZ, rotation) {
-  const cos = Math.cos(rotation);
-  const sin = Math.sin(rotation);
-
-  return {
-    x: centerX + localX * cos - localZ * sin,
-    z: centerZ + localX * sin + localZ * cos,
-  };
 }
 
 function fbm(x, z, octaves) {

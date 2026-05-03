@@ -115,8 +115,6 @@ export function createThompsonPassSnowTopoScene(container = document.body, optio
 
   const terrainData = buildTerrainData();
   addTerrain(scene, terrainData);
-  addContourLines(scene, terrainData);
-  addSnowCoveredPassTrace(scene);
   addWindPackedSnowfields(scene);
   addRockOutcrops(scene);
   addSnowToppedPineTrees(scene);

@@ -261,8 +261,8 @@ img { display: block; }
 }
 .wb-environment__placeholder strong { color: var(--text); display: block; margin-bottom: 6px; }
 .lf-vehicle-scene,
-.thompson-pass-scene { position: absolute; inset: 0; }
-.thompson-pass-scene::after {
+.mapped-terrain-scene { position: absolute; inset: 0; }
+.mapped-terrain-scene::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -278,7 +278,7 @@ img { display: block; }
   cursor: grab;
   touch-action: none;
 }
-.thompson-pass-scene canvas {
+.mapped-terrain-scene canvas {
   display: block;
   width: 100%;
   height: 100%;
@@ -286,7 +286,7 @@ img { display: block; }
   touch-action: none;
 }
 .lf-vehicle-scene canvas:active,
-.thompson-pass-scene canvas:active { cursor: grabbing; }
+.mapped-terrain-scene canvas:active { cursor: grabbing; }
 
 /* ---- Top overlay (brand + back) ---- */
 .wb-overlay-top {
@@ -298,6 +298,26 @@ img { display: block; }
   gap: 14px;
   padding: 22px 28px;
 }
+.run-sim-button {
+  margin-left: auto;
+  background: rgba(110,231,183,0.14);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(110,231,183,0.55);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 11px 16px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow: 0 0 18px rgba(110,231,183,0.16);
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+.run-sim-button:hover {
+  background: rgba(110,231,183,0.22);
+  border-color: var(--accent);
+}
+.run-sim-button:active { transform: translateY(1px); }
 .wb-overlay-top__spacer { flex: 1; }
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand--button {
