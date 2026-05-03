@@ -1,10 +1,10 @@
 export const vehicles = {
   ugv: {
     id: "ugv",
-    label: "Unarmed Autonomous Tank",
+    label: "Autonomous Wheeled Tank",
     shortLabel: "Tank",
-    summary: "Tracked autonomous armored platform with a sensor station and no weapon mount.",
-    chassis: "tracked",
+    summary: "Wheeled autonomous armored platform with circular tires and an exposed roof machine-gun mount.",
+    chassis: "wheeled",
     massKg: 180,
     payloadKg: 40,
     autonomyHours: 8,

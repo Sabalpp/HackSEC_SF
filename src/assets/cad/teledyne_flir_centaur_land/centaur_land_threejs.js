@@ -25,6 +25,8 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function buildApi() {
   "use strict";
 
+  const BODY_CLEARANCE_LIFT = 0.030;
+
   const CENTAUR_PHYSICS_METADATA = Object.freeze({
     asset_id: "teledyne_flir_centaur_land_public_surrogate",
     display_name: "Teledyne FLIR Centaur land UGV public-reference surrogate",
@@ -320,12 +322,69 @@
     return mesh;
   }
 
+  function makeSlopedPrism(THREE, materials, cfg) {
+    const {
+      xRear,
+      xFront,
+      yCenter = 0,
+      width,
+      zRearBottom,
+      zFrontBottom,
+      zRearTop,
+      zFrontTop,
+      materialName,
+      name
+    } = cfg;
+    const y0 = yCenter - width / 2;
+    const y1 = yCenter + width / 2;
+    const geom = new THREE.BufferGeometry();
+    const vertices = new Float32Array([
+      xRear, y0, zRearBottom,
+      xFront, y0, zFrontBottom,
+      xFront, y0, zFrontTop,
+      xRear, y0, zRearTop,
+      xRear, y1, zRearBottom,
+      xFront, y1, zFrontBottom,
+      xFront, y1, zFrontTop,
+      xRear, y1, zRearTop
+    ]);
+    const indices = [
+      0, 1, 2, 0, 2, 3,
+      4, 7, 6, 4, 6, 5,
+      0, 4, 5, 0, 5, 1,
+      3, 2, 6, 3, 6, 7,
+      0, 3, 7, 0, 7, 4,
+      1, 5, 6, 1, 6, 2
+    ];
+    geom.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+    geom.setIndex(indices);
+    geom.computeVertexNormals();
+
+    const mesh = new THREE.Mesh(geom, materials[materialName]);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    if (name) mesh.name = name;
+    return mesh;
+  }
+
   function makeWheel(THREE, materials, x, y, z, radius, width, hub, name) {
     const wheel = new THREE.Group();
     wheel.name = name;
     wheel.position.set(x, y, z);
     const outward = Math.sign(y) || 1;
     wheel.add(makeCylinder(THREE, materials, [0, 0, 0], radius, width, "y", "rubber", `${name}_tire`, 36));
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 10) {
+      const lug = makeBox(
+        THREE,
+        materials,
+        [Math.cos(a) * radius * 0.96, outward * (width * 0.50 + 0.006), Math.sin(a) * radius * 0.96],
+        [radius * 0.24, 0.014, radius * 0.055],
+        "armorDark",
+        `${name}_tire_lug`
+      );
+      lug.rotation.y = -a;
+      wheel.add(lug);
+    }
     wheel.add(makeCylinder(THREE, materials, [0, outward * 0.003, 0], radius * 0.74, width + 0.004, "y", "panel", `${name}_rim`, 36));
     wheel.add(makeCylinder(THREE, materials, [0, outward * 0.006, 0], hub, width + 0.008, "y", "metal", `${name}_hub`, 24));
     for (let a = 0; a < Math.PI * 2; a += Math.PI / 3) {
@@ -346,11 +405,10 @@
   }
 
   function addTrackSide(THREE, materials, parent, side) {
-    const beltY = side * 0.410;
-    const wheelY = side * 0.535;
-    const outerY = side * 0.565;
+    const innerY = side * 0.340;
+    const wheelY = side * 0.382;
     const track = new THREE.Group();
-    track.name = side > 0 ? "left_track_assembly" : "right_track_assembly";
+    track.name = side > 0 ? "left_wheeled_running_gear" : "right_wheeled_running_gear";
     const wheels = [];
     const treadBlocks = [];
 
@@ -360,60 +418,12 @@
       track.add(wheel);
     }
 
-    function addAnimatedTread(mesh, loop, baseX, baseZ) {
-      mesh.userData.treadLoop = loop;
-      mesh.userData.baseX = baseX;
-      mesh.userData.baseZ = baseZ;
-      treadBlocks.push(mesh);
-      track.add(mesh);
-    }
+    track.add(makeBox(THREE, materials, [0, innerY, 0.222], [1.42, 0.044, 0.168], "armorDark", "wheeled_suspension_beam"));
 
-    track.add(makeBox(THREE, materials, [0, beltY, 0.185], [1.68, 0.120, 0.270], "rubber", "continuous_track_belt"));
-    track.add(makeBox(THREE, materials, [0, outerY, 0.370], [1.52, 0.036, 0.085], "armorDark", "upper_track_armor_lip"));
-    track.add(makeBox(THREE, materials, [0, outerY, 0.272], [1.40, 0.026, 0.045], "panel", "thin_outer_running_gear_rail"));
-
-    addWheel(-0.650, 0.185, 0.118, 0.072, 0.042, "front_drive_sprocket");
-    addWheel(-0.390, 0.150, 0.090, 0.062, 0.034, "road_wheel_1");
-    addWheel(-0.130, 0.150, 0.090, 0.062, 0.034, "road_wheel_2");
-    addWheel(0.130, 0.150, 0.090, 0.062, 0.034, "road_wheel_3");
-    addWheel(0.390, 0.150, 0.090, 0.062, 0.034, "road_wheel_4");
-    addWheel(0.650, 0.185, 0.118, 0.072, 0.042, "rear_idler_sprocket");
-    addWheel(-0.430, 0.320, 0.044, 0.042, 0.018, "upper_return_roller_front");
-    addWheel(0.430, 0.320, 0.044, 0.042, 0.018, "upper_return_roller_rear");
-
-    for (let x = -0.720; x <= 0.720; x += 0.095) {
-      addAnimatedTread(
-        makeBox(THREE, materials, [x, outerY, 0.048], [0.060, 0.046, 0.026], "rubber", "animated_lower_tread_pad"),
-        "lower",
-        x,
-        0.048
-      );
-      addAnimatedTread(
-        makeBox(THREE, materials, [x, outerY, 0.340], [0.055, 0.040, 0.024], "rubber", "animated_upper_tread_pad"),
-        "upper",
-        x,
-        0.340
-      );
-    }
-
-    [-0.805, 0.805].forEach(x => {
-      track.add(makeBox(THREE, materials, [x, beltY, 0.188], [0.034, 0.130, 0.210], "armorDark", "track_end_guard"));
+    [-0.430, 0.000, 0.430].forEach((x, index) => {
+      track.add(makeCylinder(THREE, materials, [x, side * 0.348, 0.170], 0.018, 0.092, "y", "metal", `wheel_${index + 1}_stub_axle`));
+      addWheel(x, 0.170, 0.176, 0.048, 0.046, `large_circular_tire_${index + 1}`);
     });
-
-    for (let x = -0.690; x <= 0.690; x += 0.138) {
-      addAnimatedTread(
-        makeBox(THREE, materials, [x, side * 0.595, 0.068], [0.070, 0.022, 0.040], "rubber", "outer_lower_track_cleat"),
-        "lower",
-        x,
-        0.068
-      );
-      addAnimatedTread(
-        makeBox(THREE, materials, [x, side * 0.595, 0.330], [0.070, 0.022, 0.035], "rubber", "outer_upper_track_cleat"),
-        "upper",
-        x,
-        0.330
-      );
-    }
 
     track.userData.animatedTrack = { side, wheels, treadBlocks, phase: 0 };
     parent.add(track);
@@ -421,77 +431,125 @@
   }
 
   function addChassis(THREE, materials, parent) {
-    addNamed(parent, makeBox(THREE, materials, [0, 0, 0.330], [1.56, 0.760, 0.235], "body"), "low_unarmed_tank_lower_hull");
-    addNamed(parent, makeBox(THREE, materials, [0.020, 0, 0.470], [1.36, 0.640, 0.132], "panel"), "long_angular_armored_tub");
-    addNamed(parent, makeBox(THREE, materials, [0.360, 0, 0.565], [0.500, 0.520, 0.095], "body"), "raised_front_sensor_deck");
-    addNamed(parent, makeBox(THREE, materials, [-0.405, 0, 0.552], [0.390, 0.540, 0.075], "armorDark"), "rear_engine_deck");
+    addNamed(parent, makeBox(THREE, materials, [0, 0, 0.305], [1.56, 0.580, 0.205], "body"), "low_wheeled_tank_lower_hull");
+    addNamed(parent, makeBox(THREE, materials, [-0.285, 0, 0.436], [0.810, 0.500, 0.138], "panel"), "single_flat_rear_armored_deck");
 
-    const frontGlacis = makeBox(THREE, materials, [0.800, 0, 0.415], [0.070, 0.640, 0.210], "panel", "front_sloped_glacis");
-    frontGlacis.rotation.y = -0.24;
-    parent.add(frontGlacis);
+    parent.add(makeSlopedPrism(THREE, materials, {
+      xRear: 0.105,
+      xFront: 0.845,
+      width: 0.515,
+      zRearBottom: 0.402,
+      zFrontBottom: 0.270,
+      zRearTop: 0.505,
+      zFrontTop: 0.330,
+      materialName: "panel",
+      name: "smooth_downward_front_armored_slope"
+    }));
+    parent.add(makeSlopedPrism(THREE, materials, {
+      xRear: 0.105,
+      xFront: 0.845,
+      width: 0.500,
+      zRearBottom: 0.310,
+      zFrontBottom: 0.230,
+      zRearTop: 0.402,
+      zFrontTop: 0.270,
+      materialName: "panel",
+      name: "chamfered_front_underbody_fill"
+    }));
 
-    const rearArmor = makeBox(THREE, materials, [-0.780, 0, 0.405], [0.065, 0.620, 0.190], "armorDark", "rear_armor_plate");
+    for (let side of [-1, 1]) {
+      parent.add(makeSlopedPrism(THREE, materials, {
+        xRear: 0.105,
+        xFront: 0.845,
+        yCenter: side * 0.287,
+        width: 0.056,
+        zRearBottom: 0.292,
+        zFrontBottom: 0.242,
+        zRearTop: 0.505,
+        zFrontTop: 0.330,
+        materialName: "armorDark",
+        name: "diagonal_front_side_armor_slope"
+      }));
+    }
+
+    const rearArmor = makeBox(THREE, materials, [-0.780, 0, 0.365], [0.065, 0.500, 0.165], "armorDark", "rear_armor_plate");
     rearArmor.rotation.y = 0.14;
     parent.add(rearArmor);
 
-    addNamed(parent, makeBox(THREE, materials, [0.210, 0.345, 0.586], [0.440, 0.026, 0.020], "camoBrown"), "right_olive_brown_camo_band");
-    addNamed(parent, makeBox(THREE, materials, [-0.180, -0.345, 0.580], [0.560, 0.028, 0.020], "camoTan"), "left_tan_camo_band");
-    addNamed(parent, makeBox(THREE, materials, [0.610, -0.130, 0.622], [0.240, 0.240, 0.020], "camoBrown"), "front_deck_camo_patch");
-    addNamed(parent, makeBox(THREE, materials, [-0.390, 0.130, 0.604], [0.280, 0.270, 0.020], "camoTan"), "rear_deck_camo_patch");
-
     for (let side of [-1, 1]) {
-      const angledSide = makeBox(THREE, materials, [0.130, side * 0.390, 0.435], [1.210, 0.052, 0.180], "armorDark", "angled_side_armor_panel");
-      angledSide.rotation.x = side * 0.10;
-      parent.add(angledSide);
-      parent.add(makeBox(THREE, materials, [0.050, side * 0.438, 0.525], [1.120, 0.024, 0.032], "metal", "side_armor_top_fastener_strip"));
+      parent.add(makeSlopedPrism(THREE, materials, {
+        xRear: -0.650,
+        xFront: 0.105,
+        yCenter: side * 0.300,
+        width: 0.034,
+        zRearBottom: 0.292,
+        zFrontBottom: 0.292,
+        zRearTop: 0.505,
+        zFrontTop: 0.505,
+        materialName: "armorDark",
+        name: "flat_rear_side_armor_panel"
+      }));
+      parent.add(makeSlopedPrism(THREE, materials, {
+        xRear: 0.105,
+        xFront: 0.690,
+        yCenter: side * 0.332,
+        width: 0.014,
+        zRearBottom: 0.505,
+        zFrontBottom: 0.367,
+        zRearTop: 0.523,
+        zFrontTop: 0.385,
+        materialName: "metal",
+        name: "slanted_front_side_armor_top_fastener_strip"
+      }));
     }
 
-    [-0.460, -0.260, -0.060, 0.140].forEach((x, i) => {
-      addNamed(parent, makeBox(THREE, materials, [x, 0, 0.542], [0.150, 0.410, 0.018], "armorDark"), `flush_roof_access_hatch_${i + 1}`);
+    [-0.500, -0.300, -0.100].forEach((x, i) => {
+      addNamed(parent, makeBox(THREE, materials, [x, 0, 0.513], [0.150, 0.410, 0.014], "armorDark"), `flush_rear_roof_access_hatch_${i + 1}`);
     });
 
     for (let x = -0.620; x <= 0.620; x += 0.155) {
-      parent.add(makeCylinder(THREE, materials, [x, 0.392, 0.478], 0.006, 0.010, "y", "metal", "right_side_fastener"));
-      parent.add(makeCylinder(THREE, materials, [x, -0.392, 0.478], 0.006, 0.010, "y", "metal", "left_side_fastener"));
+      parent.add(makeCylinder(THREE, materials, [x, 0.302, 0.430], 0.006, 0.010, "y", "metal", "right_side_fastener"));
+      parent.add(makeCylinder(THREE, materials, [x, -0.302, 0.430], 0.006, 0.010, "y", "metal", "left_side_fastener"));
     }
 
     for (let y of [-0.235, 0.235]) {
-      parent.add(makeCylinder(THREE, materials, [0.805, y, 0.405], 0.024, 0.010, "x", "glass", "recessed_front_sensor_lens"));
-      parent.add(makeBox(THREE, materials, [-0.705, y, 0.498], [0.035, 0.110, 0.040], "armorDark", "rear_exhaust_louver"));
+      parent.add(makeBox(THREE, materials, [-0.705, y, 0.440], [0.035, 0.110, 0.036], "armorDark", "rear_exhaust_louver"));
     }
 
     for (let y of [-0.225, -0.075, 0.075, 0.225]) {
-      parent.add(makeBox(THREE, materials, [-0.350, y, 0.590], [0.210, 0.044, 0.018], "metal", "engine_deck_vent_slat"));
+      parent.add(makeBox(THREE, materials, [-0.350, y, 0.476], [0.210, 0.038, 0.008], "metal", "flush_engine_deck_vent_slat"));
     }
   }
 
-  function addMastAndCamera(THREE, materials, parent) {
-    const mast = new THREE.Group();
-    mast.name = "unarmed_roof_sensor_station";
+  function addRoofMachineGun(THREE, materials, parent) {
+    const gun = new THREE.Group();
+    gun.name = "exposed_roof_machine_gun_mount";
+    gun.position.z = -0.070;
 
-    mast.add(makeCylinder(THREE, materials, [0.285, 0, 0.650], 0.118, 0.060, "z", "armorDark", "low_roof_turntable"));
-    mast.add(makeBox(THREE, materials, [0.285, 0, 0.710], [0.275, 0.255, 0.075], "panel", "armored_sensor_pedestal"));
-    mast.add(makeBox(THREE, materials, [0.350, 0, 0.800], [0.315, 0.190, 0.130], "armorDark", "unarmed_sensor_head"));
-    mast.add(makeBox(THREE, materials, [0.515, 0, 0.815], [0.026, 0.146, 0.088], "metal", "flat_sensor_faceplate"));
-    mast.add(makeCylinder(THREE, materials, [0.535, -0.040, 0.825], 0.028, 0.014, "x", "glass", "day_camera_lens"));
-    mast.add(makeCylinder(THREE, materials, [0.535, 0.042, 0.825], 0.022, 0.014, "x", "glass", "thermal_camera_lens"));
-    mast.add(makeCylinder(THREE, materials, [0.690, 0, 0.808], 0.030, 0.300, "x", "glass", "blunt_forward_optical_sensor_boom", 32));
-    mast.add(makeCylinder(THREE, materials, [0.850, 0, 0.808], 0.037, 0.020, "x", "metal", "sensor_boom_end_cap", 32));
-    mast.add(makeBox(THREE, materials, [0.430, 0, 0.890], [0.230, 0.170, 0.022], "body", "sensor_sunshade"));
+    gun.add(makeBox(THREE, materials, [0, 0, 0.562], [0.270, 0.190, 0.060], "armorDark", "roof_integrated_gun_base"));
+    gun.add(makeBox(THREE, materials, [0, 0, 0.598], [0.230, 0.160, 0.030], "metal", "bolted_gun_mount_cap"));
+    gun.add(makeCylinder(THREE, materials, [0, 0, 0.635], 0.035, 0.075, "z", "metal", "short_pintle_post", 18));
+    gun.add(makeCylinder(THREE, materials, [0, 0, 0.682], 0.042, 0.085, "y", "armorDark", "cross_pin_cradle", 18));
+    gun.add(makeCylinderBetween(THREE, materials, [-0.060, -0.055, 0.575], [0.050, -0.025, 0.675], 0.010, "metal", "left_mount_brace"));
+    gun.add(makeCylinderBetween(THREE, materials, [-0.060, 0.055, 0.575], [0.050, 0.025, 0.675], 0.010, "metal", "right_mount_brace"));
 
-    mast.add(makeBox(THREE, materials, [0.040, 0, 0.620], [0.275, 0.120, 0.048], "armorDark", "roof_equipment_box"));
-    mast.add(makeBox(THREE, materials, [0.040, 0, 0.663], [0.242, 0.092, 0.026], "camoBrown", "equipment_box_lid"));
-    mast.add(makeCylinder(THREE, materials, [-0.150, -0.265, 0.900], 0.009, 0.500, "z", "metal", "left_short_radio_antenna", 12));
-    mast.add(makeCylinder(THREE, materials, [-0.150, 0.265, 0.900], 0.009, 0.500, "z", "metal", "right_short_radio_antenna", 12));
-    mast.add(makeCylinder(THREE, materials, [-0.150, -0.265, 0.620], 0.030, 0.030, "z", "armorDark", "left_antenna_base", 16));
-    mast.add(makeCylinder(THREE, materials, [-0.150, 0.265, 0.620], 0.030, 0.030, "z", "armorDark", "right_antenna_base", 16));
+    gun.add(makeBox(THREE, materials, [0.175, 0, 0.710], [0.275, 0.092, 0.082], "armorDark", "machine_gun_receiver"));
+    gun.add(makeBox(THREE, materials, [0.070, 0, 0.758], [0.110, 0.062, 0.024], "metal", "top_feed_cover"));
+    gun.add(makeBox(THREE, materials, [0.165, -0.076, 0.693], [0.150, 0.066, 0.100], "camoBrown", "side_ammo_box"));
+    gun.add(makeBox(THREE, materials, [0.088, -0.048, 0.719], [0.102, 0.025, 0.034], "metal", "short_feed_chute"));
 
-    mast.add(makeCylinderBetween(THREE, materials, [-0.535, -0.330, 0.575], [-0.535, -0.330, 0.705], 0.014, "armorDark", "left_rear_lift_loop"));
-    mast.add(makeCylinderBetween(THREE, materials, [-0.535, -0.330, 0.705], [-0.440, -0.330, 0.705], 0.014, "armorDark", "left_rear_lift_loop_top"));
-    mast.add(makeCylinderBetween(THREE, materials, [-0.535, 0.330, 0.575], [-0.535, 0.330, 0.705], 0.014, "armorDark", "right_rear_lift_loop"));
-    mast.add(makeCylinderBetween(THREE, materials, [-0.535, 0.330, 0.705], [-0.440, 0.330, 0.705], 0.014, "armorDark", "right_rear_lift_loop_top"));
+    gun.add(makeCylinder(THREE, materials, [0.410, 0, 0.720], 0.018, 0.330, "x", "metal", "machine_gun_barrel", 24));
+    gun.add(makeCylinder(THREE, materials, [0.575, 0, 0.720], 0.025, 0.060, "x", "armorDark", "slotted_muzzle_device", 24));
+    gun.add(makeCylinder(THREE, materials, [0.330, 0, 0.720], 0.027, 0.090, "x", "armorDark", "barrel_cooling_sleeve", 24));
+    for (let x = 0.295; x <= 0.365; x += 0.035) {
+      gun.add(makeCylinder(THREE, materials, [x, 0, 0.748], 0.006, 0.070, "y", "metal", "cooling_sleeve_slot"));
+    }
 
-    parent.add(mast);
+    gun.add(makeBox(THREE, materials, [0.040, -0.070, 0.650], [0.030, 0.026, 0.100], "metal", "left_spade_grip"));
+    gun.add(makeBox(THREE, materials, [0.040, 0.070, 0.650], [0.030, 0.026, 0.100], "metal", "right_spade_grip"));
+    gun.add(makeCylinder(THREE, materials, [0.290, 0, 0.770], 0.017, 0.028, "z", "glass", "small_ring_sight", 24));
+
+    parent.add(gun);
   }
 
   function addManipulatorArm(THREE, materials, parent) {
@@ -638,17 +696,21 @@
 
     const materials = makeMaterials(THREE, settings);
     const group = new THREE.Group();
-    group.name = "unarmed_autonomous_tracked_tank_surrogate";
+    group.name = "armed_autonomous_wheeled_tank_surrogate";
     group.userData.metadata = CENTAUR_PHYSICS_METADATA;
 
     const exterior = new THREE.Group();
-    exterior.name = "unarmed_tank_exterior_reference_visual";
+    exterior.name = "armed_wheeled_tank_exterior_reference_visual";
     const animatedTracks = [
       addTrackSide(THREE, materials, exterior, 1),
       addTrackSide(THREE, materials, exterior, -1)
     ];
-    addChassis(THREE, materials, exterior);
-    addMastAndCamera(THREE, materials, exterior);
+    const upperBody = new THREE.Group();
+    upperBody.name = "raised_wheeled_tank_upper_body";
+    upperBody.position.z = BODY_CLEARANCE_LIFT;
+    addChassis(THREE, materials, upperBody);
+    addRoofMachineGun(THREE, materials, upperBody);
+    exterior.add(upperBody);
     group.add(exterior);
 
     const internalGroup = addInternalSurrogates(THREE, materials, group, settings);
@@ -689,7 +751,7 @@
         state.phase = (state.phase + trackSpeed * safeDelta) % 1.48;
 
         state.wheels.forEach((wheel) => {
-          wheel.rotation.y = (wheel.rotation.y + state.side * spinRate * safeDelta) % (Math.PI * 2);
+          wheel.rotation.y = (wheel.rotation.y - state.side * spinRate * safeDelta) % (Math.PI * 2);
         });
 
         state.treadBlocks.forEach((block) => {
