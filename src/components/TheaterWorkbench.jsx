@@ -310,42 +310,86 @@ const reasonNumber = (value, digits = 0) => {
   return digits > 0 ? parsed.toFixed(digits) : String(Math.round(parsed));
 };
 
+const RESEARCH_SOURCE_NOTE = "research/Skunk Works v2.pdf and research/Skunk Works v2 copy.pdf";
+
+const RESEARCH_MECHANISMS = {
+  extreme_heat: {
+    engine: "Oil thins, cooling system overloads, intake air is less dense, and engine power drops.",
+    battery: "Permanent capacity reduction from sustained high-temperature exposure.",
+    hydraulics: "Hydraulic fluid thins and seals degrade under heat load.",
+    default: "Extreme heat degrades engine performance and accelerates thermal wear.",
+  },
+  extreme_cold: {
+    engine: "Cold starts fail, oil thickens, and fuel gels.",
+    battery: "Immediate capacity drop and reduced charge acceptance.",
+    hydraulics: "Hydraulic fluid becomes sluggish and actuators can fail.",
+    default: "Extreme cold kills battery and hydraulic reliability and stresses startup systems.",
+  },
+  dust_ingestion: {
+    engine: "Filters clog, engines overheat, and abrasive particles score cylinder walls.",
+    sensors: "Optical surfaces are scratched or obscured, and radar antenna elements clog.",
+    default: "Dust ingestion clogs filters and blocks exposed surfaces.",
+  },
+  humidity: {
+    sensors: "Moisture enters connectors, condensation forms on optics, and electrical contacts corrode.",
+    chassis: "Rust forms at weld points and joints; hatch seals degrade.",
+    default: "Moisture gets into connectors, corrodes metal contacts, and creates heat buildup.",
+  },
+  salinity: {
+    chassis: "Salinity accelerates corrosion at welds, joints, underbelly, and metal contacts.",
+    sensors: "Salt exposure destroys electrical contacts and connector reliability.",
+    default: "Salinity accelerates corrosion on metal and destroys electrical contacts.",
+  },
+  uv_solar_radiation: {
+    sensors: "Optical coatings on cameras, rangefinders, and periscopes degrade; accuracy drifts.",
+    hydraulics: "External hoses, rubber seals, and gaskets shrink or become brittle.",
+    battery: "Sustained solar heat load causes permanent battery capacity reduction.",
+    default: "UV and solar radiation shrink rubber seals and degrade optical coatings.",
+  },
+};
+
+const researchMechanismForFactor = (factorId, subsystem) => (
+  RESEARCH_MECHANISMS[factorId]?.[subsystem] ??
+  RESEARCH_MECHANISMS[factorId]?.default ??
+  "Environmental exposure degrades this component."
+);
+
 const ENVIRONMENT_FAILURE_FACTORS = [
   {
     id: "extremeHeat",
     label: "Extreme heat",
     isActive: (inputs) => Number(inputs?.temperatureF) >= 100,
-    describe: (inputs) => `Extreme heat (${reasonNumber(inputs?.temperatureF)}°F)`,
+    describe: (inputs) => `Extreme heat ${reasonNumber(inputs?.temperatureF)}°F: oil thinning, cooling overload, thermal capacity loss`,
   },
   {
     id: "extremeCold",
     label: "Extreme cold",
     isActive: (inputs) => Number(inputs?.temperatureF) <= 32,
-    describe: (inputs) => `Extreme cold (${reasonNumber(inputs?.temperatureF)}°F)`,
+    describe: (inputs) => `Extreme cold ${reasonNumber(inputs?.temperatureF)}°F: cold starts fail, oil thickens, capacity drops`,
   },
   {
     id: "dustIngestion",
     label: "Dust ingestion",
     isActive: (inputs) => Number(inputs?.dustMgM3) >= 4,
-    describe: (inputs) => `Dust ingestion (${reasonNumber(inputs?.dustMgM3, 1)} mg/m³)`,
+    describe: (inputs) => `Dust ${reasonNumber(inputs?.dustMgM3, 1)} mg/m³: filters clog, engines overheat, optics/radar foul`,
   },
   {
     id: "humidity",
     label: "Humidity",
     isActive: (inputs) => Number(inputs?.relativeHumidityPct) >= 70,
-    describe: (inputs) => `Humidity (${reasonNumber(inputs?.relativeHumidityPct)}%)`,
+    describe: (inputs) => `Humidity ${reasonNumber(inputs?.relativeHumidityPct)}%: connector moisture, contact corrosion, optical condensation`,
   },
   {
     id: "salinity",
     label: "Salinity",
     isActive: (inputs) => Number(inputs?.salinityPct) >= 0.5,
-    describe: (inputs) => `Salinity (${reasonNumber(inputs?.salinityPct, 1)}%)`,
+    describe: (inputs) => `Salinity ${reasonNumber(inputs?.salinityPct, 1)}%: weld, joint, underbelly, and contact corrosion`,
   },
   {
     id: "uvSolarRadiation",
     label: "UV / solar radiation",
     isActive: (inputs) => Number(inputs?.uvWm2) >= 500,
-    describe: (inputs) => `UV / solar radiation (${reasonNumber(inputs?.uvWm2)} W/m²)`,
+    describe: (inputs) => `UV / solar ${reasonNumber(inputs?.uvWm2)} W/m²: seal shrinkage, brittle hoses, optical coating loss`,
   },
 ];
 
@@ -595,6 +639,319 @@ const buildPhysicsEnvironment = (params) => {
   };
 };
 
+const celsiusToFahrenheit = (temperatureC) => (temperatureC * (9 / 5)) + 32;
+
+const formatDiagnosticDecimal = (value, maxDigits = 4) => {
+  const numericValue = Math.abs(Number(value) || 0);
+  if (numericValue === 0) return "0";
+  if (numericValue >= 10) return numericValue.toFixed(2);
+  if (numericValue >= 1) return numericValue.toFixed(3);
+  return numericValue.toFixed(maxDigits);
+};
+
+const formatSignedFixed = (value, digits = 6) => {
+  const numericValue = Number(value) || 0;
+  if (Math.abs(numericValue) < Number(`1e-${digits}`)) return (0).toFixed(digits);
+  const sign = numericValue > 0 ? "+" : "-";
+  return `${sign}${Math.abs(numericValue).toFixed(digits)}`;
+};
+
+const formatAppliedIntegrityChange = (value) => {
+  const scaledValue = (Number(value) || 0) * PHYSICS_DEGRADATION_SCALE;
+  return `${formatSignedFixed(scaledValue, 6)} integrity/day`;
+};
+
+const formatAppliedFactorChange = (value) => {
+  const scaledValue = (Number(value) || 0) * PHYSICS_DEGRADATION_SCALE;
+  return `${formatSignedFixed(scaledValue, 6)} integrity/day`;
+};
+
+const formatCoefficient = (value) => {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return "0";
+  if (Math.abs(numericValue) >= 1) return numericValue.toFixed(3);
+  return numericValue.toPrecision(3);
+};
+
+function DiagnosticFormula({ label, coefficient, children }) {
+  return (
+    <span className="health-diagnostics__formula" aria-label={label}>
+      <span className="health-diagnostics__formula-lhs">
+        <span className="health-diagnostics__math-frac">
+          <span>dx</span>
+          <span>dt</span>
+        </span>
+      </span>
+      <span className="health-diagnostics__math-op">=</span>
+      <span className="health-diagnostics__math-op">-</span>
+      <span className="health-diagnostics__math-coeff">{coefficient}</span>
+      <span className="health-diagnostics__math-op">&middot;</span>
+      <span className="health-diagnostics__formula-term">{children}</span>
+    </span>
+  );
+}
+
+const environmentSnapshotValues = (snapshot) => {
+  const environment = snapshot?.environment ?? {};
+  return {
+    temperatureC: Number.isFinite(Number(environment.temperature_c))
+      ? Number(environment.temperature_c)
+      : null,
+    temperatureF: Number.isFinite(Number(environment.temperature_c))
+      ? celsiusToFahrenheit(Number(environment.temperature_c))
+      : null,
+    particulateConcentration: Number.isFinite(Number(environment.particulate_concentration))
+      ? Number(environment.particulate_concentration)
+      : null,
+    particulateMgM3: Number.isFinite(Number(environment.particulate_concentration))
+      ? Number(environment.particulate_concentration) * 1000
+      : null,
+    humidityRatio: Number.isFinite(Number(environment.relative_humidity))
+      ? Number(environment.relative_humidity)
+      : null,
+    salinityFraction: Number.isFinite(Number(environment.salinity_concentration))
+      ? Number(environment.salinity_concentration)
+      : null,
+    irradianceNormalized: Number.isFinite(Number(environment.irradiance))
+      ? Number(environment.irradiance)
+      : null,
+    irradianceWm2: Number.isFinite(Number(environment.irradiance))
+      ? Number(environment.irradiance) * 1000
+      : null,
+  };
+};
+
+const DIAGNOSTIC_FACTOR_DETAILS = {
+  extreme_heat: {
+    coefficientBySubsystem: {
+      engine: "engine_heat",
+      battery: "battery_heat",
+      hydraulics: "hydraulics_heat",
+    },
+    thresholdBySubsystem: {
+      engine: "engine_heat_c",
+      battery: "battery_heat_c",
+      hydraulics: "hydraulics_heat_c",
+    },
+    describe: ({ snapshot, subsystem, coefficientKey, thresholdKey }) => {
+      const environment = environmentSnapshotValues(snapshot);
+      const threshold = snapshot?.thresholds?.[thresholdKey];
+      const coefficient = snapshot?.coefficients?.[coefficientKey];
+      const marginText = Number.isFinite(environment.temperatureC) && Number.isFinite(Number(threshold))
+        ? `${formatDiagnosticDecimal(environment.temperatureC - Number(threshold), 3)} C above limit`
+        : "above the material limit";
+      const temperatureC = Number.isFinite(environment.temperatureC)
+        ? environment.temperatureC.toFixed(3)
+        : "unknown";
+      const limitC = Number.isFinite(Number(threshold)) ? Number(threshold).toFixed(3) : "unknown";
+      return {
+        input: `T ${temperatureC} C (${Math.round(environment.temperatureF ?? 0)} deg F); limit ${limitC} C; ${marginText}`,
+        formula: (
+          <DiagnosticFormula
+            coefficient={formatCoefficient(coefficient)}
+            label={`dx over dt equals -${formatCoefficient(coefficient)} times max of zero and temperature minus heat limit`}
+          >
+            <span className="health-diagnostics__math-fn">max</span>
+            <span>(0, <var>T</var><sub>C</sub> - <var>T</var><sub>heat</sub>)</span>
+          </DiagnosticFormula>
+        ),
+        mechanism: researchMechanismForFactor("extreme_heat", subsystem),
+      };
+    },
+  },
+  extreme_cold: {
+    coefficientBySubsystem: {
+      engine: "engine_cold",
+      battery: "battery_cold",
+      hydraulics: "hydraulics_cold",
+    },
+    thresholdBySubsystem: {
+      engine: "engine_cold_c",
+      battery: "battery_cold_c",
+      hydraulics: "hydraulics_cold_c",
+    },
+    describe: ({ snapshot, subsystem, coefficientKey, thresholdKey }) => {
+      const environment = environmentSnapshotValues(snapshot);
+      const threshold = snapshot?.thresholds?.[thresholdKey];
+      const coefficient = snapshot?.coefficients?.[coefficientKey];
+      const marginText = Number.isFinite(environment.temperatureC) && Number.isFinite(Number(threshold))
+        ? `${formatDiagnosticDecimal(Number(threshold) - environment.temperatureC, 3)} C below limit`
+        : "below the material limit";
+      const temperatureC = Number.isFinite(environment.temperatureC)
+        ? environment.temperatureC.toFixed(3)
+        : "unknown";
+      const limitC = Number.isFinite(Number(threshold)) ? Number(threshold).toFixed(3) : "unknown";
+      return {
+        input: `T ${temperatureC} C (${Math.round(environment.temperatureF ?? 0)} deg F); limit ${limitC} C; ${marginText}`,
+        formula: (
+          <DiagnosticFormula
+            coefficient={formatCoefficient(coefficient)}
+            label={`dx over dt equals -${formatCoefficient(coefficient)} times max of zero and cold limit minus temperature`}
+          >
+            <span className="health-diagnostics__math-fn">max</span>
+            <span>(0, <var>T</var><sub>cold</sub> - <var>T</var><sub>C</sub>)</span>
+          </DiagnosticFormula>
+        ),
+        mechanism: researchMechanismForFactor("extreme_cold", subsystem),
+      };
+    },
+  },
+  dust_ingestion: {
+    coefficientBySubsystem: {
+      engine: "engine_dust",
+      sensors: "sensors_dust",
+    },
+    describe: ({ snapshot, subsystem, coefficientKey }) => {
+      const environment = environmentSnapshotValues(snapshot);
+      const coefficient = snapshot?.coefficients?.[coefficientKey];
+      const dust = Number.isFinite(environment.particulateMgM3)
+        ? environment.particulateMgM3.toFixed(2)
+        : "unknown";
+      const modelDust = Number.isFinite(environment.particulateConcentration)
+        ? environment.particulateConcentration.toFixed(6)
+        : "unknown";
+      return {
+        input: `d ${modelDust} normalized (${dust} mg/m3)`,
+        formula: (
+          <DiagnosticFormula
+            coefficient={formatCoefficient(coefficient)}
+            label={`dx over dt equals -${formatCoefficient(coefficient)} times particulate concentration`}
+          >
+            <var>d</var>
+          </DiagnosticFormula>
+        ),
+        mechanism: researchMechanismForFactor("dust_ingestion", subsystem),
+      };
+    },
+  },
+  humidity: {
+    coefficientBySubsystem: {
+      sensors: "sensors_humidity",
+      chassis: "chassis_humidity",
+    },
+    thresholdBySubsystem: {
+      sensors: "sensors_humidity",
+      chassis: "chassis_humidity",
+    },
+    describe: ({ snapshot, subsystem, coefficientKey, thresholdKey }) => {
+      const environment = environmentSnapshotValues(snapshot);
+      const coefficient = snapshot?.coefficients?.[coefficientKey];
+      const threshold = Number(snapshot?.thresholds?.[thresholdKey] ?? 0);
+      const humidity = Number.isFinite(environment.humidityRatio)
+        ? environment.humidityRatio.toFixed(3)
+        : "unknown";
+      const excess = Number.isFinite(environment.humidityRatio)
+        ? Math.max(0, environment.humidityRatio - threshold).toFixed(3)
+        : "unknown";
+      return {
+        input: `y ${humidity} RH; threshold ${threshold.toFixed(3)}; excess ${excess}`,
+        formula: (
+          <DiagnosticFormula
+            coefficient={formatCoefficient(coefficient)}
+            label={`dx over dt equals -${formatCoefficient(coefficient)} times max of zero and humidity minus threshold`}
+          >
+            <span className="health-diagnostics__math-fn">max</span>
+            <span>(0, <var>y</var> - <var>y</var><sub>thr</sub>)</span>
+          </DiagnosticFormula>
+        ),
+        mechanism: researchMechanismForFactor("humidity", subsystem),
+      };
+    },
+  },
+  salinity: {
+    coefficientBySubsystem: {
+      chassis: "chassis_salinity",
+    },
+    describe: ({ snapshot, subsystem, coefficientKey }) => {
+      const environment = environmentSnapshotValues(snapshot);
+      const coefficient = snapshot?.coefficients?.[coefficientKey];
+      const salinity = Number.isFinite(environment.salinityFraction)
+        ? environment.salinityFraction.toFixed(4)
+        : "unknown";
+      return {
+        input: `sigma ${salinity} salinity fraction`,
+        formula: (
+          <DiagnosticFormula
+            coefficient={formatCoefficient(coefficient)}
+            label={`dx over dt equals -${formatCoefficient(coefficient)} times salinity squared`}
+          >
+            <var>&sigma;</var><sup>2</sup>
+          </DiagnosticFormula>
+        ),
+        mechanism: researchMechanismForFactor("salinity", subsystem),
+      };
+    },
+  },
+  uv_solar_radiation: {
+    coefficientBySubsystem: {
+      battery: "battery_uv",
+      hydraulics: "hydraulics_uv",
+      sensors: "sensors_uv",
+    },
+    describe: ({ snapshot, subsystem, coefficientKey }) => {
+      const environment = environmentSnapshotValues(snapshot);
+      const coefficient = snapshot?.coefficients?.[coefficientKey];
+      const irradiance = Number.isFinite(environment.irradianceWm2)
+        ? Math.round(environment.irradianceWm2)
+        : "unknown";
+      const modelIrradiance = Number.isFinite(environment.irradianceNormalized)
+        ? environment.irradianceNormalized.toFixed(6)
+        : "unknown";
+      const formula = subsystem === "battery" ? "irradiance squared" : "irradiance";
+      const engineFormula = subsystem === "battery" ? "u^2" : "u";
+      return {
+        input: `u ${modelIrradiance} normalized (${irradiance} W/m2)`,
+        formula: (
+          <DiagnosticFormula
+            coefficient={formatCoefficient(coefficient)}
+            label={`dx over dt equals -${formatCoefficient(coefficient)} times ${formula}`}
+          >
+            <var>u</var>{engineFormula === "u^2" && <sup>2</sup>}
+          </DiagnosticFormula>
+        ),
+        mechanism: researchMechanismForFactor("uv_solar_radiation", subsystem),
+      };
+    },
+  },
+};
+
+const describeDiagnosticFactor = (factor, subsystem, snapshot) => {
+  const detail = DIAGNOSTIC_FACTOR_DETAILS[factor?.id];
+  if (!detail) {
+    return {
+      input: "Active in engine diagnostics",
+      formula: (
+        <DiagnosticFormula coefficient="k" label="dx over dt equals -k times active stress term">
+          <var>s</var>
+        </DiagnosticFormula>
+      ),
+      mechanism: "Environmental degradation is being applied to this component.",
+    };
+  }
+
+  const coefficientKey = detail.coefficientBySubsystem?.[subsystem];
+  const thresholdKey = detail.thresholdBySubsystem?.[subsystem];
+  if (!coefficientKey && detail.coefficientBySubsystem) {
+    return {
+      input: "No mapped coefficient",
+      formula: (
+        <DiagnosticFormula coefficient="0" label="dx over dt equals zero times active stress term">
+          <var>s</var>
+        </DiagnosticFormula>
+      ),
+      mechanism: "This driver is active elsewhere but not mapped to this component.",
+    };
+  }
+
+  return detail.describe({
+    factor,
+    subsystem,
+    snapshot,
+    coefficientKey,
+    thresholdKey,
+  });
+};
+
 const healthValueForItem = (snapshot, item) => {
   if (item.overall) return clampHealthUnit(snapshot?.vehicle_health ?? 1);
   return clampHealthUnit(snapshot?.subsystems?.[item.subsystem] ?? snapshot?.vehicle_health ?? 1);
@@ -640,6 +997,12 @@ const buildFailureSummary = (series, inputs = {}, durationDays = 0) => (
     ))
 );
 
+const missionStatusLabel = (failureCount) => (
+  failureCount > 0
+    ? `${failureCount} Critical Components Failed`
+    : "Mission Passed"
+);
+
 const buildTrendPoints = (series, item, yOffset = 0) => {
   if (!series.length) return "";
   const minDay = series[0].day;
@@ -655,7 +1018,175 @@ const buildTrendPoints = (series, item, yOffset = 0) => {
     .join(" ");
 };
 
-const buildReportPdf = (report) => {
+const pdfFiniteNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const pdfFormatNumber = (value, digits = 6) => pdfFiniteNumber(value).toFixed(digits);
+
+const pdfFormatSignedNumber = (value, digits = 6) => {
+  const parsed = pdfFiniteNumber(value);
+  if (Math.abs(parsed) < Number(`1e-${digits}`)) return (0).toFixed(digits);
+  return `${parsed > 0 ? "+" : "-"}${Math.abs(parsed).toFixed(digits)}`;
+};
+
+const wrapPdfText = (value, maxChars) => {
+  const words = String(value).replace(/\s+/g, " ").trim().split(" ");
+  const lines = [];
+  let currentLine = "";
+
+  words.forEach((word) => {
+    const nextLine = currentLine ? `${currentLine} ${word}` : word;
+    if (nextLine.length > maxChars && currentLine) {
+      lines.push(currentLine);
+      currentLine = word;
+    } else {
+      currentLine = nextLine;
+    }
+  });
+
+  if (currentLine) lines.push(currentLine);
+  return lines.length ? lines : [""];
+};
+
+const pdfReportInputs = (report, snapshot) => {
+  const environment = snapshot?.environment ?? {};
+  const inputs = report?.inputs ?? {};
+  const temperatureC = Number.isFinite(Number(environment.temperature_c))
+    ? Number(environment.temperature_c)
+    : fahrenheitToCelsius(Number(inputs.temperatureF) || 0);
+  const particulate = Number.isFinite(Number(environment.particulate_concentration))
+    ? Number(environment.particulate_concentration)
+    : (Number(inputs.dustMgM3) || 0) / 1000;
+  const humidity = Number.isFinite(Number(environment.relative_humidity))
+    ? Number(environment.relative_humidity)
+    : (Number(inputs.relativeHumidityPct) || 0) / 100;
+  const salinity = Number.isFinite(Number(environment.salinity_concentration))
+    ? Number(environment.salinity_concentration)
+    : (Number(inputs.salinityPct) || 0) / 100;
+  const irradiance = Number.isFinite(Number(environment.irradiance))
+    ? Number(environment.irradiance)
+    : (Number(inputs.uvWm2) || 0) / 1000;
+
+  return {
+    temperatureC,
+    temperatureF: celsiusToFahrenheit(temperatureC),
+    particulate,
+    particulateMgM3: particulate * 1000,
+    humidity,
+    salinity,
+    irradiance,
+    irradianceWm2: irradiance * 1000,
+  };
+};
+
+const pdfTerm = (label, coefficient, stress, why) => {
+  const k = pdfFiniteNumber(coefficient);
+  const s = pdfFiniteNumber(stress);
+  const raw = -k * s;
+  return {
+    label,
+    coefficient: k,
+    stress: s,
+    raw,
+    daily: raw * PHYSICS_DEGRADATION_SCALE,
+    why,
+  };
+};
+
+const pdfColdStress = (threshold, temperatureC) => (
+  Number.isFinite(Number(threshold)) ? Math.max(0, Number(threshold) - temperatureC) : 0
+);
+
+const buildPdfPhysicsCards = (report, finalSnapshot) => {
+  const c = finalSnapshot?.coefficients ?? {};
+  const t = finalSnapshot?.thresholds ?? {};
+  const input = pdfReportInputs(report, finalSnapshot);
+  const heatStress = (threshold) => Math.max(0, input.temperatureC - pdfFiniteNumber(threshold));
+  const humidityStress = (threshold) => Math.max(0, input.humidity - pdfFiniteNumber(threshold));
+  const card = (id, label, components, equation, terms, why) => {
+    const dxdt = terms.reduce((sum, term) => sum + term.raw, 0);
+    return {
+      id,
+      label,
+      components,
+      equation,
+      terms,
+      dxdt,
+      daily: dxdt * PHYSICS_DEGRADATION_SCALE,
+      health: clampHealthUnit(finalSnapshot?.subsystems?.[id] ?? finalSnapshot?.vehicle_health ?? 1),
+      why,
+    };
+  };
+
+  return {
+    input,
+    cards: [
+      card(
+        "engine",
+        "Engine",
+        "Engine",
+        "dx_engine/dt = -k_heat*max(0,T_C-T_heat) - k_cold*max(0,T_cold-T_C) - k_dust*d",
+        [
+          pdfTerm("heat", c.engine_heat, heatStress(t.engine_heat_c), researchMechanismForFactor("extreme_heat", "engine")),
+          pdfTerm("cold", c.engine_cold, pdfColdStress(t.engine_cold_c, input.temperatureC), researchMechanismForFactor("extreme_cold", "engine")),
+          pdfTerm("dust", c.engine_dust, input.particulate, researchMechanismForFactor("dust_ingestion", "engine")),
+        ],
+        "Engine degrades from thermal margin loss and abrasive intake contamination.",
+      ),
+      card(
+        "battery",
+        "Battery",
+        "Battery",
+        "dx_battery/dt = -k_heat*max(0,T_C-T_heat) - k_cold*max(0,T_cold-T_C) - k_uv*u^2",
+        [
+          pdfTerm("heat", c.battery_heat, heatStress(t.battery_heat_c), researchMechanismForFactor("extreme_heat", "battery")),
+          pdfTerm("cold", c.battery_cold, pdfColdStress(t.battery_cold_c, input.temperatureC), researchMechanismForFactor("extreme_cold", "battery")),
+          pdfTerm("uv", c.battery_uv, input.irradiance ** 2, researchMechanismForFactor("uv_solar_radiation", "battery")),
+        ],
+        "Battery degrades from temperature-driven capacity loss and solar heat loading.",
+      ),
+      card(
+        "hydraulics",
+        "Hydraulics",
+        "Hydraulics",
+        "dx_hydraulics/dt = -k_heat*max(0,T_C-T_heat) - k_cold*max(0,T_cold-T_C) - k_uv*u",
+        [
+          pdfTerm("heat", c.hydraulics_heat, heatStress(t.hydraulics_heat_c), researchMechanismForFactor("extreme_heat", "hydraulics")),
+          pdfTerm("cold", c.hydraulics_cold, pdfColdStress(t.hydraulics_cold_c, input.temperatureC), researchMechanismForFactor("extreme_cold", "hydraulics")),
+          pdfTerm("uv", c.hydraulics_uv, input.irradiance, researchMechanismForFactor("uv_solar_radiation", "hydraulics")),
+        ],
+        "Hydraulics degrade from fluid viscosity shifts, seal damage, actuator sluggishness, and UV hose aging.",
+      ),
+      card(
+        "sensors",
+        "Sensors",
+        "Thermal, Radar, Acoustic, GPS, Camera",
+        "dx_sensors/dt = -k_dust*d - k_humidity*max(0,y-y_thr) - k_uv*u",
+        [
+          pdfTerm("dust", c.sensors_dust, input.particulate, researchMechanismForFactor("dust_ingestion", "sensors")),
+          pdfTerm("humidity", c.sensors_humidity, humidityStress(t.sensors_humidity), researchMechanismForFactor("humidity", "sensors")),
+          pdfTerm("uv", c.sensors_uv, input.irradiance, researchMechanismForFactor("uv_solar_radiation", "sensors")),
+        ],
+        "Sensor subcomponents inherit this sensor equation because the engine tracks one sensor-health state.",
+      ),
+      card(
+        "chassis",
+        "Chassis",
+        "Frame, Plating, Suspension, Underbelly, Track/wheels, Hatches/doors",
+        "dx_chassis/dt = -k_humidity*max(0,y-y_thr) - k_salinity*sigma^2",
+        [
+          pdfTerm("humidity", c.chassis_humidity, humidityStress(t.chassis_humidity), researchMechanismForFactor("humidity", "chassis")),
+          pdfTerm("salinity", c.chassis_salinity, input.salinity ** 2, researchMechanismForFactor("salinity", "chassis")),
+        ],
+        "Chassis subcomponents inherit this chassis equation because the engine tracks one chassis-health state.",
+      ),
+    ],
+  };
+};
+
+const buildLegacyReportPdf = (report) => {
   const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
   const finalHealth = clampHealthUnit(finalSnapshot.vehicle_health ?? 1);
   const content = [];
@@ -675,6 +1206,7 @@ const buildReportPdf = (report) => {
     componentItems.reduce((sum, item) => sum + healthValueForItem(finalSnapshot, item), 0) /
     Math.max(1, componentItems.length);
   const failures = buildFailureSummary(report.series, report.inputs, report.durationDays);
+  const reportTitle = `Contingency Report - ${missionStatusLabel(failures.length)}`;
 
   const setFill = (rgb) => content.push(`${rgb} rg`);
   const setStroke = (rgb) => content.push(`${rgb} RG`);
@@ -720,23 +1252,24 @@ const buildReportPdf = (report) => {
     text(formatHealthPercent(endHealth), x + 12, y + 12, 10, healthRgb);
     progressBar(x + 48, y + 8, 34, 4, endHealth, healthRgb);
 
-    line(chartX, chartY, chartX + chartWidth, chartY, "0.86 0.90 0.95", 0.45);
-    line(chartX, chartY + chartHeight, chartX + chartWidth, chartY + chartHeight, "0.86 0.90 0.95", 0.45);
+    const plotX = chartX + 13;
+    const plotY = chartY + 6;
+    const plotWidth = Math.max(10, chartWidth - 16);
+    const plotHeight = Math.max(5, chartHeight - 4);
+    line(plotX, plotY, plotX + plotWidth, plotY, "0.48 0.56 0.68", 0.5);
+    line(plotX, plotY, plotX, plotY + plotHeight, "0.48 0.56 0.68", 0.5);
+    line(plotX, plotY + plotHeight, plotX + plotWidth, plotY + plotHeight, "0.86 0.90 0.95", 0.35);
+    text("100", chartX, plotY + plotHeight - 1.3, 3, "0.42 0.50 0.62");
+    text("0", plotX - 5, plotY - 1.3, 3, "0.42 0.50 0.62");
+    text(`D${Math.round(minDay)}`, plotX - 1, chartY + 0.8, 3, "0.42 0.50 0.62");
+    text(`D${Math.round(maxDay)}`, plotX + plotWidth - 12, chartY + 0.8, 3, "0.42 0.50 0.62");
 
     const path = report.series.map((point, pointIndex) => {
       const health = healthValueForItem(point.snapshot, item);
-      const pointX = chartX + ((point.day - minDay) / daySpan) * chartWidth;
-      const pointY = chartY + health * chartHeight;
+      const pointX = plotX + ((point.day - minDay) / daySpan) * plotWidth;
+      const pointY = plotY + health * plotHeight;
       return `${pdfNumber(pointX)} ${pdfNumber(pointY)} ${pointIndex === 0 ? "m" : "l"}`;
     }).join(" ");
-    const shadowPath = report.series.map((point, pointIndex) => {
-      const health = healthValueForItem(point.snapshot, item);
-      const pointX = chartX + ((point.day - minDay) / daySpan) * chartWidth;
-      const pointY = chartY + health * chartHeight - 1.6;
-      return `${pdfNumber(pointX)} ${pdfNumber(pointY)} ${pointIndex === 0 ? "m" : "l"}`;
-    }).join(" ");
-    setStroke("0.08 0.12 0.18");
-    content.push(`3.1 w ${shadowPath} S`);
     setStroke(healthRgb);
     content.push(`1.35 w ${path} S`);
     if (failedDay !== null) {
@@ -763,12 +1296,96 @@ const buildReportPdf = (report) => {
     }
     return cursor;
   };
+  const buildPhysicsPageContent = () => {
+    const page = [];
+    const physics = buildPdfPhysicsCards(report, finalSnapshot);
+    const pageSetFill = (rgb) => page.push(`${rgb} rg`);
+    const pageSetStroke = (rgb) => page.push(`${rgb} RG`);
+    const pageText = (value, x, y, size = 10, rgb = "0.10 0.14 0.22") => {
+      pageSetFill(rgb);
+      page.push(`BT /F1 ${size} Tf 1 0 0 1 ${pdfNumber(x)} ${pdfNumber(y)} Tm (${pdfEscapeText(value)}) Tj ET`);
+    };
+    const pageLine = (x1, y1, x2, y2, rgb = "0.82 0.86 0.91", width = 0.8) => {
+      pageSetStroke(rgb);
+      page.push(`${pdfNumber(width)} w ${pdfNumber(x1)} ${pdfNumber(y1)} m ${pdfNumber(x2)} ${pdfNumber(y2)} l S`);
+    };
+    const pageStrokedRect = (x, y, width, height, strokeRgb = "0.82 0.86 0.91", strokeWidth = 0.8) => {
+      pageSetStroke(strokeRgb);
+      page.push(`${pdfNumber(strokeWidth)} w ${pdfNumber(x)} ${pdfNumber(y)} ${pdfNumber(width)} ${pdfNumber(height)} re S`);
+    };
+    const pageFilledRect = (x, y, width, height, fillRgb) => {
+      pageSetFill(fillRgb);
+      page.push(`${pdfNumber(x)} ${pdfNumber(y)} ${pdfNumber(width)} ${pdfNumber(height)} re f`);
+    };
+    const pageFilledAndStrokedRect = (x, y, width, height, fillRgb, strokeRgb = "0.82 0.86 0.91") => {
+      pageFilledRect(x, y, width, height, fillRgb);
+      pageStrokedRect(x, y, width, height, strokeRgb);
+    };
+    const pageWrappedText = (value, x, yTop, maxChars, size, rgb, lineHeight, maxLines = 4) => {
+      const lines = wrapPdfText(value, maxChars).slice(0, maxLines);
+      lines.forEach((lineText, index) => {
+        const suffix = index === maxLines - 1 && wrapPdfText(value, maxChars).length > maxLines ? "..." : "";
+        pageText(`${lineText}${suffix}`, x, yTop - index * lineHeight, size, rgb);
+      });
+      return yTop - lines.length * lineHeight;
+    };
+    const drawPhysicsCard = (card, x, yTop, width, height) => {
+      const y = yTop - height;
+      pageFilledAndStrokedRect(x, y, width, height, "1.00 1.00 1.00", "0.81 0.87 0.94");
+      pageFilledRect(x, y, 4, height, pdfRgbForHealth(card.health));
+      pageText(card.label.toUpperCase(), x + 10, yTop - 14, 8, "0.20 0.39 0.72");
+      pageText(`${formatHealthPercent(card.health)} final | dx/dt ${pdfFormatSignedNumber(card.dxdt)} | daily ${pdfFormatSignedNumber(card.daily)}`, x + 10, yTop - 27, 6.2, "0.30 0.38 0.48");
+
+      let cursor = pageWrappedText(`Components: ${card.components}`, x + 10, yTop - 40, 56, 5.7, "0.42 0.50 0.62", 7, 2);
+      cursor = pageWrappedText(`Equation: ${card.equation}`, x + 10, cursor - 1, 62, 5.8, "0.08 0.13 0.22", 7, 2);
+      pageLine(x + 10, cursor - 2, x + width - 10, cursor - 2, "0.88 0.91 0.95", 0.45);
+      cursor -= 12;
+      card.terms.forEach((term) => {
+        cursor = pageWrappedText(
+          `${term.label}: raw ${pdfFormatSignedNumber(term.raw)}; daily ${pdfFormatSignedNumber(term.daily)}; k ${pdfFormatNumber(term.coefficient)}; stress ${pdfFormatNumber(term.stress)}; ${term.why}`,
+          x + 10,
+          cursor,
+          74,
+          5.2,
+          Math.abs(term.raw) > 0 ? "0.70 0.18 0.18" : "0.40 0.48 0.58",
+          6.1,
+          2,
+        ) - 1;
+      });
+    };
+
+    pageFilledRect(0, 0, PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT, "0.96 0.98 1.00");
+    pageFilledRect(0, 696, PDF_PAGE_WIDTH, 96, "0.05 0.09 0.16");
+    pageFilledRect(0, 696, PDF_PAGE_WIDTH, 5, pdfRgbForHealth(finalHealth));
+    pageText("LANDFORGE", margin, 762, 10, "0.58 0.76 0.96");
+    pageText("Physics Equations At Work", margin, 734, 20, "0.96 0.98 1.00");
+    pageText("Source: engine/src/modules/environmental.rs + engine/physics engine.pdf", margin, 716, 7.5, "0.72 0.82 0.94");
+
+    pageFilledAndStrokedRect(margin, 612, PDF_PAGE_WIDTH - margin * 2, 68, "1.00 1.00 1.00", "0.82 0.88 0.95");
+    pageText("RUN INPUTS AND UPDATE RULE", margin + 10, 663, 7.2, "0.20 0.39 0.72");
+    pageText(`T_C=${pdfFormatNumber(physics.input.temperatureC, 3)} (${Math.round(physics.input.temperatureF)} F), d=${pdfFormatNumber(physics.input.particulate)} (${pdfFormatNumber(physics.input.particulateMgM3, 2)} mg/m3), y=${pdfFormatNumber(physics.input.humidity, 3)}, sigma=${pdfFormatNumber(physics.input.salinity, 4)}, u=${pdfFormatNumber(physics.input.irradiance)} (${Math.round(physics.input.irradianceWm2)} W/m2)`, margin + 10, 648, 6.2, "0.08 0.13 0.22");
+    pageText(`Per simulated day: x_next = clamp(x + ${pdfFormatNumber(PHYSICS_DEGRADATION_SCALE, 1)}*(dx/dt), 0, 1). This is why daily delta = ${pdfFormatNumber(PHYSICS_DEGRADATION_SCALE, 1)}*(dx/dt).`, margin + 10, 634, 6.2, "0.08 0.13 0.22");
+    pageText("Overall health = (4*engine + 3*battery + 3*hydraulics + 2*chassis + sensors) / 13.", margin + 10, 620, 6.2, "0.08 0.13 0.22");
+
+    const physicsColumnWidth = (PDF_PAGE_WIDTH - margin * 2 - columnGap) / 2;
+    const physicsCardHeight = 138;
+    const leftCards = physics.cards.slice(0, 3);
+    const rightCards = physics.cards.slice(3);
+    leftCards.forEach((card, index) => {
+      drawPhysicsCard(card, margin, 586 - index * (physicsCardHeight + 10), physicsColumnWidth, physicsCardHeight);
+    });
+    rightCards.forEach((card, index) => {
+      drawPhysicsCard(card, margin + physicsColumnWidth + columnGap, 586 - index * (physicsCardHeight + 10), physicsColumnWidth, physicsCardHeight);
+    });
+
+    return page;
+  };
 
   filledRect(0, 0, PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT, "0.96 0.98 1.00");
   filledRect(0, 696, PDF_PAGE_WIDTH, 96, "0.05 0.09 0.16");
   filledRect(0, 696, PDF_PAGE_WIDTH, 5, pdfRgbForHealth(finalHealth));
   text("LANDFORGE", margin, 762, 10, "0.58 0.76 0.96");
-  text("Contingency Report", margin, 732, 24, "0.96 0.98 1.00");
+  text(reportTitle, margin, 732, failures.length ? 18 : 21, "0.96 0.98 1.00");
 
   filledAndStrokedRect(428, 718, 148, 48, "0.09 0.14 0.23", "0.23 0.33 0.48");
   text("OVERALL HEALTH", 442, 749, 7.5, "0.62 0.72 0.84");
@@ -808,12 +1425,10 @@ const buildReportPdf = (report) => {
 
   const failureSummaryY = 536;
   filledAndStrokedRect(margin, failureSummaryY, PDF_PAGE_WIDTH - margin * 2, 48, "1.00 1.00 1.00", "0.82 0.88 0.95");
-  text("MISSION SUMMARY", margin + 10, failureSummaryY + 35, 7.2, "0.20 0.39 0.72");
+  text("MISSION SUMMARY", margin + 10, failureSummaryY + 36, 6.8, "0.20 0.39 0.72");
   if (!failures.length) {
-    text("Mission Passed", margin + 422, failureSummaryY + 35, 7.2, "0.23 0.55 0.34");
     text("No failures", margin + 10, failureSummaryY + 18, 8, "0.42 0.50 0.62");
   } else {
-    text(`${failures.length} parts failed`, margin + 408, failureSummaryY + 35, 7.2, "0.78 0.18 0.18");
     const visibleFailures = failures.slice(0, 8);
     const summaryColumnWidth = (PDF_PAGE_WIDTH - margin * 2 - 28) / 2;
     visibleFailures.forEach((failure, index) => {
@@ -844,14 +1459,21 @@ const buildReportPdf = (report) => {
   const sensorsBottom = drawPdfSection(sensorsSection, margin + columnWidth + columnGap, 476, columnWidth);
   drawPdfSection(powerSection, margin + columnWidth + columnGap, sensorsBottom - 14, columnWidth);
 
-  const stream = content.join("\n");
+  const pageStreams = [
+    content.join("\n"),
+    buildPhysicsPageContent().join("\n"),
+  ];
   const objects = [null, null, null, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"];
-  const contentObjectId = objects.length;
-  objects.push(`<< /Length ${stream.length + 1} >>\nstream\n${stream}\nendstream`);
-  const pageObjectId = objects.length;
-  objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_PAGE_WIDTH} ${PDF_PAGE_HEIGHT}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObjectId} 0 R >>`);
+  const pageObjectIds = [];
+  pageStreams.forEach((stream) => {
+    const contentObjectId = objects.length;
+    objects.push(`<< /Length ${stream.length + 1} >>\nstream\n${stream}\nendstream`);
+    const pageObjectId = objects.length;
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_PAGE_WIDTH} ${PDF_PAGE_HEIGHT}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObjectId} 0 R >>`);
+    pageObjectIds.push(pageObjectId);
+  });
   objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
-  objects[2] = `<< /Type /Pages /Kids [${pageObjectId} 0 R] /Count 1 >>`;
+  objects[2] = `<< /Type /Pages /Kids [${pageObjectIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageObjectIds.length} >>`;
 
   let pdf = "%PDF-1.4\n";
   const offsets = [0];
@@ -867,6 +1489,305 @@ const buildReportPdf = (report) => {
   pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
 
   return pdf;
+};
+
+const buildReportPdf = (report) => {
+  const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
+  const finalHealth = clampHealthUnit(finalSnapshot.vehicle_health ?? 1);
+  const failures = buildFailureSummary(report.series, report.inputs, report.durationDays);
+  const physics = buildPdfPhysicsCards(report, finalSnapshot);
+  const physicsBySubsystem = Object.fromEntries(physics.cards.map((card) => [card.id, card]));
+  const componentItems = REPORT_HEALTH_ITEMS.filter((item) => !item.overall);
+  const startDay = report.series[0]?.day ?? 0;
+  const endDay = report.series[report.series.length - 1]?.day ?? report.durationDays;
+  const daySpan = Math.max(1, endDay - startDay);
+  const margin = 34;
+  const pageCount = 5;
+  const pageStreams = [];
+
+  const itemById = Object.fromEntries(REPORT_HEALTH_ITEMS.map((item) => [item.id, item]));
+  const parentItem = (subsystem) => (
+    REPORT_HEALTH_ITEMS.find((item) => item.subsystem === subsystem && item.parent)
+  );
+  const childItem = (subsystem, label) => itemById[`${subsystem}-${toHealthItemId(label)}`];
+  const chassisGroup = VEHICLE_HEALTH_GROUPS.find((group) => group.subsystem === "chassis");
+  const sensorsGroup = VEHICLE_HEALTH_GROUPS.find((group) => group.subsystem === "sensors");
+  const chassisItems = [parentItem("chassis"), ...(chassisGroup?.children ?? []).map((label) => childItem("chassis", label))].filter(Boolean);
+  const sensorItems = [parentItem("sensors"), ...(sensorsGroup?.children ?? []).map((label) => childItem("sensors", label))].filter(Boolean);
+  const powerItems = ["engine", "battery", "hydraulics"].map(parentItem).filter(Boolean);
+
+  const componentNotes = {
+    Chassis: "Shared structural health state for frame, plating, suspension, underbody, tracks/wheels, hatches, and doors.",
+    Frame: "Humidity causes rust at weld points and joints; salinity accelerates metal corrosion.",
+    Plating: "Salinity attacks metal plating; humidity drives coating breakdown and corrosion spread.",
+    Suspension: "Joints and mounts inherit weld/joint corrosion; moisture and salt reduce mechanical margin.",
+    Underbelly: "Underbelly is called out in research as a salinity corrosion target at welds and joints.",
+    "Track / wheels": "Running gear inherits chassis corrosion and dust-driven mechanical contamination.",
+    "Hatches & doors": "Research calls out hatch seal degradation from humidity and rubber/gasket shrinkage from UV.",
+    Sensors: "Shared sensor health state for thermal, radar, acoustic, GPS, and camera packages.",
+    Thermal: "Thermal optics inherit condensation, optical coating degradation, dust obscuration, and accuracy drift.",
+    Radar: "Radar inherits clogged antenna elements from dust and corrosion on electrical contacts from humidity.",
+    Acoustic: "Acoustic sensors inherit connector moisture and corrosion-driven reliability loss.",
+    GPS: "GPS receiver and antenna contacts inherit connector moisture and electrical contact corrosion.",
+    Camera: "Camera optics inherit dust scratching/obscuration, condensation, and UV optical coating degradation.",
+    Engine: "Research calls out oil thinning, cooling overload, less dense intake air, filter clogging, and scored cylinder walls.",
+    Battery: "Research calls out immediate cold capacity drop, reduced charge acceptance, and permanent heat/solar capacity loss.",
+    Hydraulics: "Research calls out fluid thinning in heat, sluggish fluid in cold, actuator failure, seal degradation, and brittle hoses.",
+  };
+
+  const createPage = (title, subtitle, pageNumber) => {
+    const ops = [];
+    const setFill = (rgb) => ops.push(`${rgb} rg`);
+    const setStroke = (rgb) => ops.push(`${rgb} RG`);
+    const text = (value, x, y, size = 10, rgb = "0.10 0.14 0.22", font = "F1") => {
+      setFill(rgb);
+      ops.push(`BT /${font} ${size} Tf 1 0 0 1 ${pdfNumber(x)} ${pdfNumber(y)} Tm (${pdfEscapeText(value)}) Tj ET`);
+    };
+    const line = (x1, y1, x2, y2, rgb = "0.82 0.86 0.91", width = 0.8) => {
+      setStroke(rgb);
+      ops.push(`${pdfNumber(width)} w ${pdfNumber(x1)} ${pdfNumber(y1)} m ${pdfNumber(x2)} ${pdfNumber(y2)} l S`);
+    };
+    const rect = (x, y, width, height, fillRgb, strokeRgb = null, strokeWidth = 0.8) => {
+      if (fillRgb) {
+        setFill(fillRgb);
+        ops.push(`${pdfNumber(x)} ${pdfNumber(y)} ${pdfNumber(width)} ${pdfNumber(height)} re f`);
+      }
+      if (strokeRgb) {
+        setStroke(strokeRgb);
+        ops.push(`${pdfNumber(strokeWidth)} w ${pdfNumber(x)} ${pdfNumber(y)} ${pdfNumber(width)} ${pdfNumber(height)} re S`);
+      }
+    };
+    const wrappedText = (value, x, yTop, maxChars, size, rgb, lineHeight, maxLines = 4, font = "F1") => {
+      const allLines = wrapPdfText(value, maxChars);
+      const lines = allLines.slice(0, maxLines);
+      lines.forEach((lineText, index) => {
+        const suffix = index === maxLines - 1 && allLines.length > maxLines ? "..." : "";
+        text(`${lineText}${suffix}`, x, yTop - index * lineHeight, size, rgb, font);
+      });
+      return yTop - lines.length * lineHeight;
+    };
+
+    rect(0, 0, PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT, "0.96 0.98 1.00");
+    rect(margin, 704, PDF_PAGE_WIDTH - margin * 2, 4, pdfRgbForHealth(finalHealth));
+    text("LANDFORGE", margin, 764, 9, "0.20 0.39 0.72", "F2");
+    text(title, margin, 740, 20, "0.08 0.13 0.22", "F2");
+    text(subtitle, margin, 721, 7.5, "0.30 0.38 0.48");
+    text(`Page ${pageNumber} of ${pageCount}`, PDF_PAGE_WIDTH - margin - 54, 721, 7.5, "0.30 0.38 0.48");
+    text(`Sources: ${RESEARCH_SOURCE_NOTE}; engine equations from Rust source.`, margin, 28, 6.2, "0.48 0.56 0.68");
+
+    return { ops, setFill, setStroke, text, line, rect, wrappedText };
+  };
+
+  const addPage = (page) => {
+    pageStreams.push(page.ops.join("\n"));
+  };
+
+  const drawMetric = (page, x, y, width, height, label, value, accentRgb) => {
+    page.rect(x, y, width, height, "1.00 1.00 1.00", "0.82 0.88 0.95");
+    page.rect(x, y, 4, height, accentRgb);
+    page.text(label.toUpperCase(), x + 11, y + height - 13, 6.6, "0.45 0.54 0.66", "F2");
+    page.wrappedText(value, x + 11, y + height - 26, Math.max(12, Math.floor(width / 6)), 8.4, "0.08 0.13 0.22", 9, 2, "F2");
+  };
+
+  const drawTrend = (page, item, x, y, width, height) => {
+    const healthRgb = pdfRgbForHealth(healthValueForItem(finalSnapshot, item));
+    const leftPad = width < 84 ? 12 : 16;
+    const bottomPad = height < 24 ? 7 : 9;
+    const topPad = height < 24 ? 4 : 5;
+    const rightPad = 3;
+    const plotX = x + leftPad;
+    const plotY = y + bottomPad;
+    const plotWidth = Math.max(10, width - leftPad - rightPad);
+    const plotHeight = Math.max(6, height - bottomPad - topPad);
+    const labelSize = width < 84 ? 3 : 3.4;
+    const startLabel = `D${Math.round(startDay)}`;
+    const endLabel = `D${Math.round(endDay)}`;
+
+    page.line(plotX, plotY, plotX + plotWidth, plotY, "0.48 0.56 0.68", 0.5);
+    page.line(plotX, plotY, plotX, plotY + plotHeight, "0.48 0.56 0.68", 0.5);
+    page.line(plotX, plotY + plotHeight, plotX + plotWidth, plotY + plotHeight, "0.86 0.90 0.95", 0.35);
+    page.line(plotX + plotWidth, plotY, plotX + plotWidth, plotY + plotHeight, "0.90 0.93 0.97", 0.25);
+    page.text(width < 84 ? "%" : "Integrity", x, y + height - 2.5, labelSize, "0.30 0.38 0.48", "F2");
+    page.text("100", x, plotY + plotHeight - 1.5, labelSize, "0.42 0.50 0.62");
+    page.text("0", x + leftPad - 6, plotY - 1.5, labelSize, "0.42 0.50 0.62");
+    page.text(startLabel, plotX - 1, y + 1.2, labelSize, "0.42 0.50 0.62");
+    if (width >= 78) {
+      page.text("Day", plotX + plotWidth * 0.45, y + 1.2, labelSize, "0.30 0.38 0.48", "F2");
+    }
+    page.text(endLabel, plotX + plotWidth - Math.min(16, endLabel.length * 2), y + 1.2, labelSize, "0.42 0.50 0.62");
+    const path = report.series.map((point, index) => {
+      const value = healthValueForItem(point.snapshot, item);
+      const px = plotX + ((point.day - startDay) / daySpan) * plotWidth;
+      const py = plotY + value * plotHeight;
+      return `${pdfNumber(px)} ${pdfNumber(py)} ${index === 0 ? "m" : "l"}`;
+    }).join(" ");
+    page.setStroke(healthRgb);
+    page.ops.push(`1.2 w ${path} S`);
+  };
+
+  const termLine = (term) => (
+    `${term.label}: k=${pdfFormatNumber(term.coefficient, 5)} stress=${pdfFormatNumber(term.stress, 5)} dx/dt=${pdfFormatSignedNumber(term.raw, 6)} daily=${pdfFormatSignedNumber(term.daily, 6)}`
+  );
+
+  const drawTermRows = (page, card, x, yTop, width, maxRows = card.terms.length) => {
+    let cursor = yTop;
+    card.terms.slice(0, maxRows).forEach((term) => {
+      const active = Math.abs(term.raw) > 0;
+      page.wrappedText(termLine(term), x, cursor, Math.floor(width / 5.3), 5.5, active ? "0.70 0.18 0.18" : "0.42 0.50 0.62", 6.4, 1, "F2");
+      cursor -= 7;
+      cursor = page.wrappedText(term.why, x + 8, cursor, Math.floor((width - 8) / 5.7), 5.1, "0.35 0.43 0.54", 6, 2) - 1;
+    });
+    return cursor;
+  };
+
+  const drawEquationPanel = (page, card, x, yTop, width, height) => {
+    const y = yTop - height;
+    page.rect(x, y, width, height, "1.00 1.00 1.00", "0.81 0.87 0.94");
+    page.rect(x, y, 4, height, pdfRgbForHealth(card.health));
+    page.text(card.label.toUpperCase(), x + 10, yTop - 14, 8.2, "0.20 0.39 0.72", "F2");
+    page.text(`${formatHealthPercent(card.health)} final | dx/dt ${pdfFormatSignedNumber(card.dxdt, 6)} | daily ${pdfFormatSignedNumber(card.daily, 6)}`, x + 10, yTop - 28, 6.1, "0.30 0.38 0.48", "F2");
+    let cursor = page.wrappedText(card.equation, x + 10, yTop - 42, Math.floor((width - 20) / 5.4), 5.8, "0.08 0.13 0.22", 7, 2, "F2");
+    page.line(x + 10, cursor - 2, x + width - 10, cursor - 2, "0.88 0.91 0.95", 0.45);
+    drawTermRows(page, card, x + 10, cursor - 12, width - 20, card.terms.length);
+  };
+
+  const drawComponentCard = (page, item, card, x, yTop, width, height, note, compact = false) => {
+    const y = yTop - height;
+    const health = healthValueForItem(finalSnapshot, item);
+    const healthRgb = pdfRgbForHealth(health);
+    const failedDay = failedDayForItem(report.series, item);
+    const modelLabel = item.parent ? "tracked subsystem" : `inherits ${card.label.toLowerCase()} state`;
+    page.rect(x, y, width, height, "1.00 1.00 1.00", "0.82 0.88 0.95");
+    page.rect(x, y, 4, height, healthRgb);
+    page.text(item.label.toUpperCase(), x + 10, yTop - 13, compact ? 6.8 : 8, "0.08 0.13 0.22", "F2");
+    page.text(`${formatHealthPercent(health)} final | ${failedDay === null ? "no failure" : `failed day ${failedDay}`}`, x + 10, yTop - 26, 6, healthRgb, "F2");
+    page.text(modelLabel, x + 10, yTop - 38, 5.6, "0.40 0.48 0.58");
+    drawTrend(page, item, x + width - (compact ? 108 : 176), yTop - (compact ? 48 : 54), compact ? 96 : 160, compact ? 30 : 40);
+    let cursor = page.wrappedText(note, x + 10, yTop - 52, compact ? 38 : 68, 5.2, "0.32 0.40 0.50", 6, compact ? 2 : 3);
+    if (!compact) {
+      cursor = page.wrappedText(card.equation, x + 10, cursor - 2, Math.floor((width - 20) / 5.3), 5.3, "0.08 0.13 0.22", 6, 2, "F2");
+      drawTermRows(page, card, x + 10, cursor - 5, width - 20, card.terms.length);
+    }
+  };
+
+  const buildPdfObjects = () => {
+    const objects = [
+      null,
+      null,
+      null,
+      "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+      "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+    ];
+    const pageObjectIds = [];
+    pageStreams.forEach((stream) => {
+      const contentObjectId = objects.length;
+      objects.push(`<< /Length ${stream.length + 1} >>\nstream\n${stream}\nendstream`);
+      const pageObjectId = objects.length;
+      objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_PAGE_WIDTH} ${PDF_PAGE_HEIGHT}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentObjectId} 0 R >>`);
+      pageObjectIds.push(pageObjectId);
+    });
+    objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+    objects[2] = `<< /Type /Pages /Kids [${pageObjectIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageObjectIds.length} >>`;
+
+    let pdf = "%PDF-1.4\n";
+    const offsets = [0];
+    for (let i = 1; i < objects.length; i += 1) {
+      offsets[i] = pdf.length;
+      pdf += `${i} 0 obj\n${objects[i]}\nendobj\n`;
+    }
+    const xrefStart = pdf.length;
+    pdf += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+    for (let i = 1; i < objects.length; i += 1) {
+      pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+    }
+    pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+    return pdf;
+  };
+
+  const page1 = createPage("Contingency Report", missionStatusLabel(failures.length), 1);
+  const tileWidth = (PDF_PAGE_WIDTH - margin * 2 - 24) / 4;
+  drawMetric(page1, margin, 644, tileWidth, 46, "Overall", formatHealthPercent(finalHealth), pdfRgbForHealth(finalHealth));
+  drawMetric(page1, margin + (tileWidth + 8), 644, tileWidth, 46, "Unit", report.unitLabel, "0.20 0.39 0.72");
+  drawMetric(page1, margin + (tileWidth + 8) * 2, 644, tileWidth, 46, "Duration", `${report.durationDays} days`, "0.23 0.55 0.34");
+  drawMetric(page1, margin + (tileWidth + 8) * 3, 644, tileWidth, 46, "Material", report.material, "0.55 0.34 0.18");
+  page1.text("MISSION SUMMARY", margin, 614, 9, "0.20 0.39 0.72", "F2");
+  page1.rect(margin, 492, PDF_PAGE_WIDTH - margin * 2, 108, "1.00 1.00 1.00", "0.82 0.88 0.95");
+  if (!failures.length) {
+    page1.text("No failures", margin + 12, 560, 12, "0.23 0.55 0.34", "F2");
+    page1.wrappedText("All tracked critical components stayed above the failure threshold for the simulated duration.", margin + 12, 540, 74, 7, "0.34 0.42 0.52", 9, 3);
+  } else {
+    failures.slice(0, 12).forEach((failure, index) => {
+      const col = Math.floor(index / 6);
+      const row = index % 6;
+      const x = margin + 12 + col * 260;
+      const y = 578 - row * 14;
+      page1.text(`${failure.label}: day ${failure.failedDay}, ${failure.importance.label}`, x, y, 6.6, failure.importance.rank >= 4 ? "0.75 0.16 0.16" : "0.24 0.34 0.48", "F2");
+      page1.text(truncatePdfText(failure.reason, 42), x, y - 7, 5.4, "0.42 0.50 0.62");
+    });
+  }
+  page1.text("CRITICAL COMPONENT INDEX", margin, 462, 9, "0.20 0.39 0.72", "F2");
+  page1.rect(margin, 112, PDF_PAGE_WIDTH - margin * 2, 334, "1.00 1.00 1.00", "0.82 0.88 0.95");
+  componentItems.forEach((item, index) => {
+    const col = Math.floor(index / 8);
+    const row = index % 8;
+    const x = margin + 12 + col * 270;
+    const y = 424 - row * 36;
+    const health = healthValueForItem(finalSnapshot, item);
+    const failedDay = failedDayForItem(report.series, item);
+    page1.text(item.label, x, y, 7.2, "0.08 0.13 0.22", "F2");
+    page1.text(`${formatHealthPercent(health)} final | ${failedDay === null ? "no failure" : `failed day ${failedDay}`} | model ${item.subsystem}`, x, y - 10, 6, pdfRgbForHealth(health));
+    drawTrend(page1, item, x + 150, y - 20, 100, 22);
+  });
+  addPage(page1);
+
+  const page2 = createPage("Physics Model", "Equations from Rust; mechanisms from research PDFs", 2);
+  page2.rect(margin, 610, PDF_PAGE_WIDTH - margin * 2, 80, "1.00 1.00 1.00", "0.82 0.88 0.95");
+  page2.text("RUN INPUTS", margin + 12, 672, 8, "0.20 0.39 0.72", "F2");
+  page2.text(`T_C ${pdfFormatNumber(physics.input.temperatureC, 3)} (${Math.round(physics.input.temperatureF)} F)`, margin + 12, 654, 6.6, "0.08 0.13 0.22", "F2");
+  page2.text(`d ${pdfFormatNumber(physics.input.particulate)} (${pdfFormatNumber(physics.input.particulateMgM3, 2)} mg/m3)`, margin + 190, 654, 6.6, "0.08 0.13 0.22", "F2");
+  page2.text(`y ${pdfFormatNumber(physics.input.humidity, 3)} RH`, margin + 360, 654, 6.6, "0.08 0.13 0.22", "F2");
+  page2.text(`sigma ${pdfFormatNumber(physics.input.salinity, 4)}`, margin + 12, 636, 6.6, "0.08 0.13 0.22", "F2");
+  page2.text(`u ${pdfFormatNumber(physics.input.irradiance)} (${Math.round(physics.input.irradianceWm2)} W/m2)`, margin + 190, 636, 6.6, "0.08 0.13 0.22", "F2");
+  page2.text(`Update: x_next = clamp(x + ${pdfFormatNumber(PHYSICS_DEGRADATION_SCALE, 1)}*(dx/dt), 0, 1)`, margin + 12, 618, 6.6, "0.08 0.13 0.22", "F2");
+  page2.text("Overall health = (4*engine + 3*battery + 3*hydraulics + 2*chassis + sensors) / 13", margin + 12, 604, 6.4, "0.08 0.13 0.22");
+  const eqWidth = (PDF_PAGE_WIDTH - margin * 2 - 14) / 2;
+  physics.cards.forEach((card, index) => {
+    const col = index % 2;
+    const row = Math.floor(index / 2);
+    drawEquationPanel(page2, card, margin + col * (eqWidth + 14), 578 - row * 156, eqWidth, 144);
+  });
+  addPage(page2);
+
+  const page3 = createPage("Power And Propulsion Breakdown", "Engine, battery, and hydraulics critical component states", 3);
+  powerItems.forEach((item, index) => {
+    const card = physicsBySubsystem[item.subsystem];
+    drawComponentCard(page3, item, card, margin, 672 - index * 194, PDF_PAGE_WIDTH - margin * 2, 178, componentNotes[item.label], false);
+  });
+  addPage(page3);
+
+  const page4 = createPage("Chassis Breakdown", "Every chassis critical component uses the chassis physics state", 4);
+  drawEquationPanel(page4, physicsBySubsystem.chassis, margin, 672, PDF_PAGE_WIDTH - margin * 2, 128);
+  const gridWidth = (PDF_PAGE_WIDTH - margin * 2 - 14) / 2;
+  chassisItems.forEach((item, index) => {
+    const col = index % 2;
+    const row = Math.floor(index / 2);
+    drawComponentCard(page4, item, physicsBySubsystem.chassis, margin + col * (gridWidth + 14), 522 - row * 92, gridWidth, 80, componentNotes[item.label], true);
+  });
+  addPage(page4);
+
+  const page5 = createPage("Sensor Breakdown", "Every sensor critical component uses the sensor physics state", 5);
+  drawEquationPanel(page5, physicsBySubsystem.sensors, margin, 672, PDF_PAGE_WIDTH - margin * 2, 128);
+  sensorItems.forEach((item, index) => {
+    const col = index % 2;
+    const row = Math.floor(index / 2);
+    drawComponentCard(page5, item, physicsBySubsystem.sensors, margin + col * (gridWidth + 14), 522 - row * 98, gridWidth, 86, componentNotes[item.label], true);
+  });
+  page5.rect(margin, 90, PDF_PAGE_WIDTH - margin * 2, 78, "1.00 1.00 1.00", "0.82 0.88 0.95");
+  page5.text("MODEL LIMITATION", margin + 12, 150, 7.4, "0.20 0.39 0.72", "F2");
+  page5.wrappedText("The Rust engine tracks five health states: engine, battery, hydraulics, sensors, and chassis. Chassis and sensor subcomponents are reported separately for operators, but each subcomponent currently inherits its parent subsystem health and equation.", margin + 12, 134, 96, 6.4, "0.08 0.13 0.22", 8, 4);
+  addPage(page5);
+
+  return buildPdfObjects();
 };
 
 const downloadReportPdf = (report) => {
@@ -924,15 +1845,10 @@ function ComponentTrendCard({ item, series }) {
 }
 
 function FailureSummarySection({ failures }) {
-  const statusLabel = failures.length
-    ? `${failures.length} parts failed`
-    : "Mission Passed";
-
   return (
     <section className="report-failure-summary" aria-label="Mission summary">
       <div className="report-failure-summary__head">
         <span>Mission Summary</span>
-        <strong data-status={failures.length ? "failed" : "passed"}>{statusLabel}</strong>
       </div>
       {failures.length ? (
         <div className="report-failure-summary__grid">
@@ -1004,12 +1920,19 @@ function SimulationReportPanel({ report, onClose }) {
   const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
   const finalHealth = clampHealthUnit(finalSnapshot.vehicle_health ?? 1);
   const failures = buildFailureSummary(report.series, report.inputs, report.durationDays);
+  const reportStatusTitle = missionStatusLabel(failures.length);
 
   return (
     <aside className="report-panel" aria-label="Simulation report">
+      <h2 className="report-panel__document-title">Contingency Report</h2>
       <div className="report-panel__head">
         <div className="report-panel__title-stack">
-          <div className="report-panel__title">Contingency Report</div>
+          <div
+            className="report-panel__title"
+            data-status={failures.length ? "failed" : "passed"}
+          >
+            {reportStatusTitle}
+          </div>
         </div>
         <div className="report-panel__actions">
           <div className="report-panel__score" style={healthColorStyle(finalHealth)}>
@@ -1058,35 +1981,45 @@ function SimulationReportPanel({ report, onClose }) {
   );
 }
 
-const formatDerivativeRate = (value) => {
-  const numericValue = Number(value) || 0;
-  const percentValue = numericValue * 100;
-  const absValue = Math.abs(percentValue);
-  const precision = absValue >= 10 ? 1 : absValue >= 1 ? 2 : 3;
-  const sign = percentValue > 0 ? "+" : percentValue < 0 ? "-" : "";
-  return `${sign}${absValue.toFixed(precision)}%/day`;
-};
-
-function DiagnosticsHoverCard({ diagnostics }) {
+function DiagnosticsHoverCard({ diagnostics, snapshot, subsystem }) {
   const factors = diagnostics?.factors ?? [];
 
   return (
     <div className="health-diagnostics" role="tooltip">
       <div className="health-diagnostics__head">
-        <span>dX/dt</span>
-        <strong>{formatDerivativeRate(diagnostics?.dx_dt ?? 0)}</strong>
+        <span>Applied daily change</span>
+        <strong>{formatAppliedIntegrityChange(diagnostics?.dx_dt ?? 0)}</strong>
       </div>
       {factors.length ? (
         <div className="health-diagnostics__factors">
-          {factors.map((factor) => (
-            <div className="health-diagnostics__factor" key={factor.id}>
-              <span>{factor.label}</span>
-              <strong>{formatDerivativeRate(factor.dx_dt)}</strong>
-            </div>
-          ))}
+          <div className="health-diagnostics__factors-title">
+            <span>Active drivers</span>
+            <strong>{factors.length} {factors.length === 1 ? "driver" : "drivers"}</strong>
+          </div>
+          {factors.map((factor) => {
+            const detail = describeDiagnosticFactor(factor, subsystem, snapshot);
+            return (
+              <div className="health-diagnostics__factor" key={factor.id}>
+                <div className="health-diagnostics__factor-top">
+                  <span>{factor.label}</span>
+                  <strong>{formatAppliedFactorChange(factor.dx_dt)}</strong>
+                </div>
+                <div className="health-diagnostics__factor-grid">
+                  <span>Input</span>
+                  <strong>{detail.input}</strong>
+                  <span>Formula</span>
+                  <strong>{detail.formula}</strong>
+                  <span>Mechanism</span>
+                  <strong>{detail.mechanism}</strong>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
-        <p>No active environmental factors.</p>
+        <p className="health-diagnostics__empty">
+          No active environmental factor is subtracting integrity from this component.
+        </p>
       )}
     </div>
   );
@@ -1101,15 +2034,30 @@ function VehicleHealthPanel({ snapshot, diagnostics }) {
   const getSubsystemDiagnostics = (subsystem) => (
     diagnostics?.subsystems?.[subsystem] ?? DEFAULT_DIAGNOSTICS.subsystems[subsystem]
   );
-  const showDiagnostics = (event, label, subsystemDiagnostics) => {
+  const showDiagnostics = (event, label, subsystem, subsystemDiagnostics) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    const popupWidth = 276;
-    const left = Math.max(16, rect.left - popupWidth - 14);
+    const panelRect =
+      event.currentTarget.closest(".health-panel")?.getBoundingClientRect() ?? rect;
+    const viewportPadding = 16;
+    const panelGap = 16;
+    const preferredPopupWidth = 430;
+    const minimumPopupWidth = 240;
+    const availableLeftWidth = panelRect.left - panelGap - viewportPadding;
+
+    if (availableLeftWidth < minimumPopupWidth) {
+      setActiveDiagnostics(null);
+      return;
+    }
+
+    const popupWidth = Math.min(preferredPopupWidth, availableLeftWidth);
+    const left = Math.max(viewportPadding, panelRect.left - panelGap - popupWidth);
     const top = Math.max(80, Math.min(window.innerHeight - 80, rect.top + rect.height / 2));
 
     setActiveDiagnostics({
       label,
+      subsystem,
       diagnostics: subsystemDiagnostics,
+      width: popupWidth,
       top,
       left,
     });
@@ -1126,10 +2074,10 @@ function VehicleHealthPanel({ snapshot, diagnostics }) {
         key={label}
         style={healthColorStyle(health)}
         tabIndex={0}
-        onMouseEnter={(event) => showDiagnostics(event, label, subsystemDiagnostics)}
-        onMouseMove={(event) => showDiagnostics(event, label, subsystemDiagnostics)}
+        onMouseEnter={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics)}
+        onMouseMove={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics)}
         onMouseLeave={hideDiagnostics}
-        onFocus={(event) => showDiagnostics(event, label, subsystemDiagnostics)}
+        onFocus={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics)}
         onBlur={hideDiagnostics}
       >
         <div className="health-row__top">
@@ -1153,10 +2101,10 @@ function VehicleHealthPanel({ snapshot, diagnostics }) {
         key={label}
         style={healthColorStyle(health)}
         tabIndex={0}
-        onMouseEnter={(event) => showDiagnostics(event, label, subsystemDiagnostics)}
-        onMouseMove={(event) => showDiagnostics(event, label, subsystemDiagnostics)}
+        onMouseEnter={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics)}
+        onMouseMove={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics)}
         onMouseLeave={hideDiagnostics}
-        onFocus={(event) => showDiagnostics(event, label, subsystemDiagnostics)}
+        onFocus={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics)}
         onBlur={hideDiagnostics}
       >
         <span className="health-child-row__label">{label}</span>
@@ -1175,7 +2123,7 @@ function VehicleHealthPanel({ snapshot, diagnostics }) {
       <aside className="health-panel" aria-label="Vehicle health">
         <div className="health-panel__overall" style={healthColorStyle(overallHealth)}>
           <div className="health-panel__overall-top">
-            <span>Overall Vehicle Health</span>
+            <span>Overall Vehicle Integrity</span>
             <strong>{formatHealthPercent(overallHealth)}</strong>
           </div>
           <div className="health-panel__overall-meter" aria-hidden="true">
@@ -1204,12 +2152,17 @@ function VehicleHealthPanel({ snapshot, diagnostics }) {
           style={{
             "--diagnostics-left": `${activeDiagnostics.left}px`,
             "--diagnostics-top": `${activeDiagnostics.top}px`,
+            "--diagnostics-width": `${activeDiagnostics.width}px`,
           }}
         >
           <div className="health-diagnostics-popover__label">
             {activeDiagnostics.label}
           </div>
-          <DiagnosticsHoverCard diagnostics={activeDiagnostics.diagnostics} />
+          <DiagnosticsHoverCard
+            diagnostics={activeDiagnostics.diagnostics}
+            snapshot={snapshot}
+            subsystem={activeDiagnostics.subsystem}
+          />
         </div>,
         document.body,
       )}
