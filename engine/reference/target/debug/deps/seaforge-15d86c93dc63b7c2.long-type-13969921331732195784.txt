@@ -1,1 +1,0 @@
-ship::ship::_::<impl wave::_::_serde::Deserialize<'de> for ship::ship::Ship>::deserialize::__Field

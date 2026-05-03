@@ -1,9 +1,9 @@
 import { MappedTerrainVehicleScene } from "./MappedTerrainVehicleScene";
 import {
-  addIranMesrDesertTopoWorld,
+  addSamalayucaDuneFieldsTopoWorld,
   renderHeightMetersAt,
   terrainNormalAt,
-} from "../terrains/iran_mesr_desert_topo_terrain";
+} from "../terrains/samalayuca_dune_fields_topo_terrain";
 
 export function HormuzDesertVehicleScene({ vehicleId, runToken, simulationActive }) {
   return (
@@ -12,7 +12,7 @@ export function HormuzDesertVehicleScene({ vehicleId, runToken, simulationActive
       runToken={runToken}
       simulationActive={simulationActive}
       effectType="dust"
-      addWorld={addIranMesrDesertTopoWorld}
+      addWorld={addSamalayucaDuneFieldsTopoWorld}
       renderHeightMetersAt={renderHeightMetersAt}
       terrainNormalAt={terrainNormalAt}
     />
