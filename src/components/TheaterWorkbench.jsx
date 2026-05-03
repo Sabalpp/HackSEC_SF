@@ -2,11 +2,30 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import initPhysicsEngine, { Engine as PhysicsEngine } from "../../pkg/engine.js";
+import {
+  capabilityReplacementBaselines,
+  materialProfiles,
+  subsystemEquationText,
+  subsystemEconomics,
+  vehicleHealthEquation,
+  vehicleTechnicalBaselines,
+} from "../data/technicalBaselines";
 import { theaters } from "../data/theaters";
 import { TheaterEnvironment } from "./TheaterEnvironment";
 import landforgeIcon from "../assets/landforge-icon.png";
 
 const formatCoord = (n) => `${n >= 0 ? "" : "-"}${Math.abs(n).toFixed(2)}°`;
+
+function clampFloatingPanelPosition(left, top, width, height) {
+  const margin = 12;
+  const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+  const maxTop = Math.max(margin, window.innerHeight - height - margin);
+
+  return {
+    left: Math.min(Math.max(margin, left), maxLeft),
+    top: Math.min(Math.max(margin, top), maxTop),
+  };
+}
 
 function buildCustomTheater(lat, lng) {
   return {
@@ -88,8 +107,8 @@ const CALENDAR_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
 let physicsEngineInitPromise = null;
 
 const VEHICLE_UNIT_OPTIONS = [
-  { id: "ugv", label: "Land Unit" },
-  { id: "drone", label: "Air Unit" },
+  { id: "ugv", label: vehicleTechnicalBaselines.ugv.unitLabel },
+  { id: "drone", label: vehicleTechnicalBaselines.drone.unitLabel },
 ];
 
 const MATERIAL_OPTIONS = [
@@ -655,9 +674,264 @@ const buildTrendPoints = (series, item, yOffset = 0) => {
     .join(" ");
 };
 
+const SUBSYSTEM_LABELS = {
+  engine: "Engine / Drive",
+  battery: "Battery / Power",
+  hydraulics: "Actuation / Arm",
+  sensors: "Sensors / Electronics",
+  chassis: "Chassis / Mobility",
+};
+
+const normalizeMaterialKey = (material) => (
+  materialProfiles[material] ? material : Object.keys(MATERIAL_ENGINE_KEYS).find(
+    (key) => MATERIAL_ENGINE_KEYS[key] === material,
+  ) ?? material
+);
+
+const formatMaterialName = (material) => (
+  materialProfiles[normalizeMaterialKey(material)]?.label ?? material
+);
+
+const formatFactorRate = (value) => {
+  if (!Number.isFinite(value) || Math.abs(value) < 0.000001) return "0";
+  if (Math.abs(value) < 0.01) return value.toExponential(2);
+  return value.toFixed(3);
+};
+
+const formatCelsius = (value) => `${Number(value ?? 0).toFixed(1)} C`;
+
+const getSubsystemHealth = (snapshot, subsystem) => (
+  clampHealthUnit(snapshot?.subsystems?.[subsystem] ?? snapshot?.vehicle_health ?? 1)
+);
+
+const positiveTerm = (value) => (Number.isFinite(value) ? Math.max(0, value) : 0);
+
+const activeTerms = (terms) => terms.filter((term) => term.value > 0.000001);
+
+const buildDamageBreakdown = (snapshot) => {
+  const environment = snapshot?.environment;
+  const coefficients = snapshot?.coefficients;
+  const thresholds = snapshot?.thresholds;
+
+  if (!environment || !coefficients || !thresholds) {
+    return {
+      engine: [],
+      battery: [],
+      hydraulics: [],
+      sensors: [],
+      chassis: [],
+    };
+  }
+
+  const t = Number(environment.temperature_c) || 0;
+  const dust = Math.max(0, Number(environment.particulate_concentration) || 0);
+  const humidity = Math.max(0, Number(environment.relative_humidity) || 0);
+  const salinity = Math.max(0, Number(environment.salinity_concentration) || 0);
+  const uv = Math.max(0, Number(environment.irradiance) || 0);
+  const heatTerm = (coefficient, threshold) => positiveTerm(coefficient * Math.max(0, t - threshold));
+  const coldTerm = (coefficient, threshold) => (
+    threshold === null || threshold === undefined
+      ? 0
+      : positiveTerm(coefficient * Math.max(0, threshold - t))
+  );
+
+  return {
+    engine: activeTerms([
+      {
+        factor: "Extreme heat",
+        value: heatTerm(coefficients.engine_heat, thresholds.engine_heat_c),
+        equation: "k_heat*max(T - Tcrit, 0)",
+        evidence: `T ${formatCelsius(t)} vs engine heat limit ${formatCelsius(thresholds.engine_heat_c)}`,
+        effect: "raises winding resistance, controller heat, lubricant oxidation, and bearing stress",
+      },
+      {
+        factor: "Extreme cold",
+        value: coldTerm(coefficients.engine_cold, thresholds.engine_cold_c),
+        equation: "k_cold*max(Tcold - T, 0)",
+        evidence: thresholds.engine_cold_c === null || thresholds.engine_cold_c === undefined
+          ? "selected material has no active cold penalty"
+          : `T ${formatCelsius(t)} vs cold limit ${formatCelsius(thresholds.engine_cold_c)}`,
+        effect: "thickens lubricant, lowers seal compliance, and increases startup torque",
+      },
+      {
+        factor: "Dust ingestion",
+        value: positiveTerm(coefficients.engine_dust * dust),
+        equation: "k_dust*D",
+        evidence: `D ${dust.toFixed(4)} normalized from dust input`,
+        effect: "abrades bearings, clogs cooling paths, and increases drive current",
+      },
+    ]),
+    battery: activeTerms([
+      {
+        factor: "Extreme heat",
+        value: heatTerm(coefficients.battery_heat, thresholds.battery_heat_c),
+        equation: "k_heat*max(T - Tcrit, 0)",
+        evidence: `T ${formatCelsius(t)} vs battery heat limit ${formatCelsius(thresholds.battery_heat_c)}`,
+        effect: "accelerates cell aging, raises internal resistance, and stresses BMS electronics",
+      },
+      {
+        factor: "Extreme cold",
+        value: coldTerm(coefficients.battery_cold, thresholds.battery_cold_c),
+        equation: "k_cold*max(Tcold - T, 0)",
+        evidence: thresholds.battery_cold_c === null || thresholds.battery_cold_c === undefined
+          ? "selected material has no active cold penalty"
+          : `T ${formatCelsius(t)} vs cold limit ${formatCelsius(thresholds.battery_cold_c)}`,
+        effect: "reduces lithium cell kinetics and usable discharge power",
+      },
+      {
+        factor: "Solar / UV load",
+        value: positiveTerm(coefficients.battery_uv * uv ** 2),
+        equation: "k_uv*U^2",
+        evidence: `U ${uv.toFixed(3)} normalized from irradiance input`,
+        effect: "heats packs and ages connector and enclosure polymers",
+      },
+    ]),
+    hydraulics: activeTerms([
+      {
+        factor: "Extreme heat",
+        value: heatTerm(coefficients.hydraulics_heat, thresholds.hydraulics_heat_c),
+        equation: "k_heat*max(T - Tcrit, 0)",
+        evidence: `T ${formatCelsius(t)} vs actuation heat limit ${formatCelsius(thresholds.hydraulics_heat_c)}`,
+        effect: "lowers actuator thermal margin and ages seals, grease, and motor insulation",
+      },
+      {
+        factor: "Extreme cold",
+        value: coldTerm(coefficients.hydraulics_cold, thresholds.hydraulics_cold_c),
+        equation: "k_cold*max(Tcold - T, 0)",
+        evidence: thresholds.hydraulics_cold_c === null || thresholds.hydraulics_cold_c === undefined
+          ? "selected material has no active cold penalty"
+          : `T ${formatCelsius(t)} vs cold limit ${formatCelsius(thresholds.hydraulics_cold_c)}`,
+        effect: "stiffens lubricant and seals, increasing joint current and backlash",
+      },
+      {
+        factor: "Solar / UV load",
+        value: positiveTerm(coefficients.hydraulics_uv * uv),
+        equation: "k_uv*U",
+        evidence: `U ${uv.toFixed(3)} normalized from irradiance input`,
+        effect: "embrittles exposed cable jackets, covers, and elastomer seals",
+      },
+    ]),
+    sensors: activeTerms([
+      {
+        factor: "Dust occlusion",
+        value: positiveTerm(coefficients.sensors_dust * dust),
+        equation: "k_dust*D",
+        evidence: `D ${dust.toFixed(4)} normalized from dust input`,
+        effect: "scratches windows, blocks vents, fouls connectors, and degrades optical signal",
+      },
+      {
+        factor: "Humidity / condensation",
+        value: positiveTerm(coefficients.sensors_humidity * Math.max(0, humidity - thresholds.sensors_humidity)),
+        equation: "k_humidity*max(RH - RHcrit, 0)",
+        evidence: `RH ${(humidity * 100).toFixed(0)}% vs threshold ${(thresholds.sensors_humidity * 100).toFixed(0)}%`,
+        effect: "lowers PCB insulation resistance and fogs lenses and protective windows",
+      },
+      {
+        factor: "Solar / UV load",
+        value: positiveTerm(coefficients.sensors_uv * uv),
+        equation: "k_uv*U",
+        evidence: `U ${uv.toFixed(3)} normalized from irradiance input`,
+        effect: "ages radomes, cable jackets, optical coatings, and polymer housings",
+      },
+    ]),
+    chassis: activeTerms([
+      {
+        factor: "Humidity / wetting",
+        value: positiveTerm(coefficients.chassis_humidity * Math.max(0, humidity - thresholds.chassis_humidity)),
+        equation: "k_humidity*max(RH - RHcrit, 0)",
+        evidence: `RH ${(humidity * 100).toFixed(0)}% vs threshold ${(thresholds.chassis_humidity * 100).toFixed(0)}%`,
+        effect: "attacks coatings, fasteners, bond lines, bearings, and exposed steel interfaces",
+      },
+      {
+        factor: "Salinity",
+        value: positiveTerm(coefficients.chassis_salinity * salinity ** 2),
+        equation: "k_salinity*sigma^2",
+        evidence: `sigma ${(salinity * 100).toFixed(1)}% as salinity concentration`,
+        effect: "drives crevice corrosion, galvanic couples, and conductive residue at seams",
+      },
+    ]),
+  };
+};
+
+const dominantTerm = (terms) => (
+  [...(terms ?? [])].sort((a, b) => b.value - a.value)[0] ?? null
+);
+
+const termSummary = (term) => (
+  term ? `${term.factor}: ${term.effect}` : "No active environmental term in the final physics snapshot."
+);
+
+const buildDeepReportAnalysis = (report) => {
+  const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
+  const startSnapshot = report.series[0]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
+  const baseline = vehicleTechnicalBaselines[report.vehicleId] ?? vehicleTechnicalBaselines.ugv;
+  const materialKey = normalizeMaterialKey(report.material);
+  const materialProfile = materialProfiles[materialKey] ?? {
+    label: report.material,
+    core: "selected simulation material",
+    relativeCost: "n/a",
+    weatherBehavior: "No material profile is registered for this selection.",
+    bestUse: "Review manually.",
+  };
+  const breakdown = buildDamageBreakdown(finalSnapshot);
+  const subsystemRows = Object.keys(SUBSYSTEM_LABELS).map((subsystem) => {
+    const startHealth = getSubsystemHealth(startSnapshot, subsystem);
+    const endHealth = getSubsystemHealth(finalSnapshot, subsystem);
+    const loss = Math.max(0, startHealth - endHealth);
+    const terms = breakdown[subsystem] ?? [];
+    const driver = dominantTerm(terms);
+
+    return {
+      subsystem,
+      label: SUBSYSTEM_LABELS[subsystem],
+      startHealth,
+      endHealth,
+      loss,
+      terms,
+      driver,
+      equation: subsystemEquationText[subsystem],
+    };
+  });
+  const componentRows = baseline.components.map((component) => {
+    const subsystem = subsystemRows.find((row) => row.subsystem === component.subsystem);
+    const startHealth = getSubsystemHealth(startSnapshot, component.subsystem);
+    const endHealth = getSubsystemHealth(finalSnapshot, component.subsystem);
+    const loss = Math.max(0, startHealth - endHealth);
+    const driver = subsystem?.driver ?? null;
+
+    return {
+      ...component,
+      startHealth,
+      endHealth,
+      loss,
+      driver,
+      driverText: termSummary(driver),
+    };
+  });
+  const rankedSubsystems = [...subsystemRows].sort((a, b) => b.loss - a.loss);
+  const activeTermsBySubsystem = subsystemRows.flatMap((row) =>
+    row.terms.map((term) => ({ ...term, subsystem: row.subsystem, subsystemLabel: row.label })),
+  );
+  const topFactor = activeTermsBySubsystem.sort((a, b) => b.value - a.value)[0] ?? null;
+
+  return {
+    baseline,
+    replacements: capabilityReplacementBaselines[report.vehicleId] ?? [],
+    subsystemEconomics,
+    materialProfile,
+    finalSnapshot,
+    startSnapshot,
+    subsystemRows,
+    componentRows,
+    topSubsystem: rankedSubsystems[0],
+    topFactor,
+  };
+};
+
 const buildReportPdf = (report) => {
   const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
   const finalHealth = clampHealthUnit(finalSnapshot.vehicle_health ?? 1);
+  const analysis = buildDeepReportAnalysis(report);
   const content = [];
   const margin = 36;
   const columnGap = 18;
@@ -779,7 +1053,7 @@ const buildReportPdf = (report) => {
   const summaryTiles = [
     ["Unit", report.unitLabel, "0.20 0.39 0.72"],
     ["Duration", `${report.durationDays} days`, "0.23 0.55 0.34"],
-    ["Material", report.material, "0.55 0.34 0.18"],
+    ["Material", formatMaterialName(report.material), "0.55 0.34 0.18"],
   ];
   summaryTiles.forEach(([label, value, accentRgb], index) => {
     const x = margin + index * (tileWidth + 10);
@@ -791,13 +1065,17 @@ const buildReportPdf = (report) => {
 
   const summaryY = 598;
   const healthTiles = [
-    ["Fleet Average", formatHealthPercent(averageFinalHealth), pdfRgbForHealth(averageFinalHealth)],
     [
-      "Lowest Component",
-      truncatePdfText(lowestItem?.label ?? "N/A", 22),
-      pdfRgbForHealth(healthValueForItem(finalSnapshot, lowestItem ?? REPORT_HEALTH_ITEMS[0])),
+      "Primary Subsystem",
+      truncatePdfText(analysis.topSubsystem?.label ?? "N/A", 22),
+      pdfRgbForHealth(analysis.topSubsystem?.endHealth ?? averageFinalHealth),
     ],
-    ["Components Tracked", String(REPORT_HEALTH_ITEMS.length), "0.20 0.39 0.72"],
+    [
+      "Primary Factor",
+      truncatePdfText(analysis.topFactor?.factor ?? "No active factor", 22),
+      analysis.topFactor ? "0.77 0.42 0.12" : "0.20 0.39 0.72",
+    ],
+    ["Replacement Path", truncatePdfText(analysis.replacements[0]?.name ?? analysis.baseline.displayName, 22), "0.20 0.39 0.72"],
   ];
   healthTiles.forEach(([label, value, accentRgb], index) => {
     const x = margin + index * (tileWidth + 10);
@@ -835,7 +1113,13 @@ const buildReportPdf = (report) => {
   }
 
   text("Component Health Trends", margin, 508, 12, "0.08 0.13 0.22");
-  text("Each card shows the first simulated day the part failed.", margin, 494, 8, "0.42 0.50 0.62");
+  text(
+    truncatePdfText(`${analysis.materialProfile.label}: ${analysis.materialProfile.core}`, 92),
+    margin,
+    494,
+    8,
+    "0.42 0.50 0.62",
+  );
 
   const chassisSection = REPORT_HEALTH_SECTIONS.find((section) => section.id === "chassis");
   const sensorsSection = REPORT_HEALTH_SECTIONS.find((section) => section.id === "sensors");
@@ -1000,6 +1284,212 @@ function ReportSection({ section, series }) {
   );
 }
 
+function GraphOverview({ report }) {
+  const graphItems = useMemo(() => {
+    const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
+    const startSnapshot = report.series[0]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
+    const subsystemItems = VEHICLE_HEALTH_GROUPS.map((group) => ({
+      id: group.subsystem,
+      label: group.label,
+      subsystem: group.subsystem,
+      parent: true,
+    })).sort((a, b) => {
+      const lossA = healthValueForItem(startSnapshot, a) - healthValueForItem(finalSnapshot, a);
+      const lossB = healthValueForItem(startSnapshot, b) - healthValueForItem(finalSnapshot, b);
+      return lossB - lossA;
+    });
+
+    return [REPORT_HEALTH_ITEMS[0], ...subsystemItems];
+  }, [report.series]);
+
+  return (
+    <section className="graph-overview" aria-label="Health graphs">
+      <div className="graph-overview__head">
+        <span>Health graphs</span>
+        <strong>largest drops first</strong>
+      </div>
+      <div className="graph-overview__grid">
+        {graphItems.map((item) => (
+          <ComponentTrendCard key={item.id} item={item} series={report.series} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReportStat({ label, value, detail }) {
+  return (
+    <div className="report-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {detail && <p>{detail}</p>}
+    </div>
+  );
+}
+
+function EquationTermList({ row }) {
+  return (
+    <div className="diagnosis-card__terms">
+      {row.terms.length > 0 ? row.terms.map((term) => (
+        <div className="diagnosis-term" key={`${row.subsystem}-${term.factor}`}>
+          <div className="diagnosis-term__top">
+            <strong>{term.factor}</strong>
+            <span>{formatFactorRate(term.value)}</span>
+          </div>
+          <code>{term.equation}</code>
+          <p>{term.evidence}. {term.effect}.</p>
+        </div>
+      )) : (
+        <div className="diagnosis-term diagnosis-term--empty">
+          <strong>No active final-step environmental term</strong>
+          <p>The selected material and weather inputs did not cross this subsystem's modeled damage threshold at the final snapshot.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DeepReportAnalysis({ report }) {
+  const analysis = useMemo(() => buildDeepReportAnalysis(report), [report]);
+  const finalHealth = clampHealthUnit(analysis.finalSnapshot.vehicle_health ?? 1);
+  const topSubsystem = analysis.topSubsystem;
+  const topFactor = analysis.topFactor;
+  const subsystemRows = [...analysis.subsystemRows].sort((a, b) => b.loss - a.loss);
+  const componentRows = [...analysis.componentRows].sort((a, b) => {
+    if (b.loss !== a.loss) return b.loss - a.loss;
+    return a.component.localeCompare(b.component);
+  }).slice(0, 5);
+  const keyDrivers = subsystemRows.filter((row) => row.driver).slice(0, 3);
+  const replacementRows = analysis.replacements.slice(0, 2);
+  const inputs = report.inputs ?? {};
+  const environmentSummary = `${inputs.temperatureF} F, ${inputs.dustMgM3} mg/m3 dust, ${inputs.relativeHumidityPct}% humidity, ${inputs.salinityPct}% salinity, and ${inputs.uvWm2} W/m2 UV`;
+
+  return (
+    <div className="deep-report">
+      <section className="deep-report__hero">
+        <div className="deep-report__hero-copy">
+          <div className="deep-report__kicker">Plain-language diagnosis</div>
+          <h2>{analysis.baseline.displayName}</h2>
+          <p>
+            The simulation says the biggest stress was {topFactor?.factor ?? "not severe enough to dominate"}.
+            The system most affected was {topSubsystem?.label ?? "none"}, ending at
+            {" "}{formatHealthPercent(topSubsystem?.endHealth ?? finalHealth)}.
+          </p>
+        </div>
+        <div className="report-stat-grid">
+          <ReportStat
+            label="Final health"
+            value={formatHealthPercent(finalHealth)}
+            detail="Overall vehicle condition after the run."
+          />
+          <ReportStat
+            label="Main damaged system"
+            value={topSubsystem?.label ?? "N/A"}
+            detail={`${Math.round((topSubsystem?.loss ?? 0) * 100)} point drop from start.`}
+          />
+          <ReportStat
+            label="Main cause"
+            value={topFactor?.factor ?? "None"}
+            detail={topFactor ? topFactor.effect : "No major modeled weather driver."}
+          />
+          <ReportStat
+            label="Material"
+            value={analysis.materialProfile.label}
+            detail={`Relative cost ${analysis.materialProfile.relativeCost}.`}
+          />
+        </div>
+      </section>
+
+      <section className="report-block report-block--wide">
+        <div className="report-block__head">
+          <span>Why it happened</span>
+          <strong>top modeled drivers</strong>
+        </div>
+        <p className="report-block__summary">
+          Inputs: {environmentSummary}. Overall score uses {vehicleHealthEquation}.
+        </p>
+        <div className="insight-grid">
+          {keyDrivers.map((row) => (
+            <article className="insight-card" key={row.subsystem} style={healthColorStyle(row.endHealth)}>
+              <div className="diagnosis-card__top">
+                <div>
+                  <span>{row.label}</span>
+                  <strong>{formatHealthPercent(row.endHealth)}</strong>
+                </div>
+                <em>-{Math.round(row.loss * 100)} pts</em>
+              </div>
+              <p><b>{row.driver.factor}</b> was the strongest driver. {row.driver.effect}.</p>
+              <code>{row.driver.equation}</code>
+              <p>{row.driver.evidence}.</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="report-block">
+        <div className="report-block__head">
+          <span>Material takeaway</span>
+          <strong>what matters</strong>
+        </div>
+        <div className="material-explain">
+          <div>
+            <span>Core compound</span>
+            <p>{analysis.materialProfile.core}</p>
+          </div>
+          <div>
+            <span>Why it was affected</span>
+            <p>{analysis.materialProfile.weatherBehavior}</p>
+          </div>
+          <div>
+            <span>Best use case</span>
+            <p>{analysis.materialProfile.bestUse}</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="report-block report-block--wide">
+        <div className="report-block__head">
+          <span>Parts most worth attention</span>
+          <strong>top {componentRows.length}</strong>
+        </div>
+        <div className="priority-list">
+          {componentRows.map((component) => (
+            <article className="priority-item" key={component.id}>
+              <div>
+                <strong>{component.component}</strong>
+                <span>{component.price}</span>
+              </div>
+              <p>{component.driverText}</p>
+              <p><b>Material:</b> {component.baselineMaterial}.</p>
+              <p><b>Better option:</b> {component.betterMaterial} ({component.betterCost}).</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="report-block report-block--wide">
+        <div className="report-block__head">
+          <span>Replacement insight</span>
+          <strong>architecture shift</strong>
+        </div>
+        <div className="replacement-grid">
+          {replacementRows.map((item) => (
+            <article className="replacement-card" key={item.id}>
+              <div className="replacement-card__top">
+                <span>{item.program}</span>
+                <strong>{item.name}</strong>
+              </div>
+              <p><b>Cost signal:</b> {item.cost}</p>
+              <p><b>Capability shift:</b> {item.capabilityShift}</p>
+              <p><b>Report relevance:</b> {item.damageRelevance}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SimulationReportPanel({ report, onClose }) {
   const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
   const finalHealth = clampHealthUnit(finalSnapshot.vehicle_health ?? 1);
@@ -1044,11 +1534,13 @@ function SimulationReportPanel({ report, onClose }) {
       <div className="report-panel__meta">
         <span>{report.unitLabel}</span>
         <span>{report.durationDays} days</span>
-        <span>{report.material}</span>
+        <span>{formatMaterialName(report.material)}</span>
       </div>
 
       <div className="report-panel__sections">
         <FailureSummarySection failures={failures} />
+        <GraphOverview report={report} />
+        <DeepReportAnalysis report={report} />
         <ComponentTrendCard item={REPORT_HEALTH_ITEMS[0]} series={report.series} />
         {REPORT_HEALTH_SECTIONS.map((section) => (
           <ReportSection key={section.id} section={section} series={report.series} />
@@ -1297,6 +1789,8 @@ export function TheaterWorkbench() {
   const { theaterId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const envPanelRef = useRef(null);
+  const envPanelDragRef = useRef(null);
 
   const theater = useMemo(() => {
     if (theaterId === "custom") {
@@ -1329,6 +1823,8 @@ export function TheaterWorkbench() {
   const [environmentParams, setEnvironmentParams] = useState(() =>
     buildEnvironmentDefaults(theaterIdForSim),
   );
+  const [isEnvPanelMinimized, setIsEnvPanelMinimized] = useState(false);
+  const [envPanelPosition, setEnvPanelPosition] = useState(null);
 
   useEffect(() => {
     setEnvironmentParams(buildEnvironmentDefaults(theaterIdForSim));
@@ -1347,6 +1843,22 @@ export function TheaterWorkbench() {
   useEffect(() => {
     isSimulationPausedRef.current = isSimulationPaused;
   }, [isSimulationPaused]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const panel = envPanelRef.current;
+      if (!panel) return;
+      const rect = panel.getBoundingClientRect();
+      setEnvPanelPosition((current) => (
+        current
+          ? clampFloatingPanelPosition(current.left, current.top, rect.width, rect.height)
+          : current
+      ));
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -1487,6 +1999,8 @@ export function TheaterWorkbench() {
 
         setSimulationReport({
           theaterLabel: theater.label,
+          theaterRegion: theater.region,
+          vehicleId,
           unitLabel,
           durationDays: simulationDurationDays,
           material: runInputs.material,
@@ -1632,6 +2146,56 @@ export function TheaterWorkbench() {
     setIsSimulationActive(false);
   };
 
+  const handleEnvPanelPointerDown = (event) => {
+    if (event.button !== 0) return;
+    if (event.target.closest("button, input, select, textarea, a")) return;
+
+    const panel = envPanelRef.current;
+    if (!panel) return;
+
+    const rect = panel.getBoundingClientRect();
+    envPanelDragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    panel.setPointerCapture?.(event.pointerId);
+    setEnvPanelPosition(clampFloatingPanelPosition(rect.left, rect.top, rect.width, rect.height));
+  };
+
+  const handleEnvPanelPointerMove = (event) => {
+    const drag = envPanelDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    setEnvPanelPosition(
+      clampFloatingPanelPosition(
+        event.clientX - drag.offsetX,
+        event.clientY - drag.offsetY,
+        drag.width,
+        drag.height,
+      ),
+    );
+  };
+
+  const handleEnvPanelPointerEnd = (event) => {
+    const drag = envPanelDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    envPanelRef.current?.releasePointerCapture?.(event.pointerId);
+    envPanelDragRef.current = null;
+  };
+
+  const envPanelStyle = envPanelPosition
+    ? {
+      left: `${envPanelPosition.left}px`,
+      top: `${envPanelPosition.top}px`,
+      right: "auto",
+      transform: "none",
+    }
+    : undefined;
+
   if (!theater) {
     return (
       <div className="wb-full">
@@ -1717,16 +2281,46 @@ export function TheaterWorkbench() {
       )}
 
       {!isSimulationActive && !simulationReport && (
-        <aside className="env-panel" aria-label="Input panel">
-          <div className="env-panel__head">
+        <aside
+          ref={envPanelRef}
+          className="env-panel"
+          data-minimized={isEnvPanelMinimized}
+          aria-label="Simulation inputs"
+          style={envPanelStyle}
+          onPointerMove={handleEnvPanelPointerMove}
+          onPointerUp={handleEnvPanelPointerEnd}
+          onPointerCancel={handleEnvPanelPointerEnd}
+        >
+          <div
+            className="env-panel__head"
+            onPointerDown={handleEnvPanelPointerDown}
+          >
             <div className="env-panel__title-stack">
               <div className="env-panel__title">Input Panel</div>
             </div>
-            <button type="button" className="env-panel__reset" onClick={resetEnvironment}>
-              Default
-            </button>
+            <div className="env-panel__actions">
+              <button type="button" className="env-panel__reset" onClick={resetEnvironment}>
+                Default
+              </button>
+              <button
+                type="button"
+                className="env-panel__minimize"
+                onClick={() => setIsEnvPanelMinimized((current) => !current)}
+                aria-label={isEnvPanelMinimized ? "Expand simulation inputs" : "Minimize simulation inputs"}
+                aria-expanded={!isEnvPanelMinimized}
+                title={isEnvPanelMinimized ? "Expand" : "Minimize"}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  {isEnvPanelMinimized ? (
+                    <path d="M12 5v14M5 12h14" />
+                  ) : (
+                    <path d="M5 12h14" />
+                  )}
+                </svg>
+              </button>
+            </div>
           </div>
-          <div className="env-panel__body">
+          <div className="env-panel__body" hidden={isEnvPanelMinimized}>
             <section className="env-panel__section" aria-labelledby="vehicle-inputs-title">
               <div className="env-panel__section-title" id="vehicle-inputs-title">
                 Vehicle Inputs
@@ -1758,7 +2352,7 @@ export function TheaterWorkbench() {
                 >
                   {MATERIAL_OPTIONS.map((material) => (
                     <option key={material} value={material}>
-                      {material}
+                      {materialProfiles[material]?.label ?? material}
                     </option>
                   ))}
                 </select>

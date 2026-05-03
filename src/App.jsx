@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { LandingGlobe } from "./components/LandingGlobe";
+import { SystemBrief } from "./components/SystemBrief";
 import { TheaterWorkbench } from "./components/TheaterWorkbench";
 import { preloadDefaultTankScene } from "./components/ThompsonPassVehicleScene";
 import { Stars } from "./components/Stars";
@@ -13,7 +14,7 @@ const POST_ZOOM_HOLD_MS = 0;
 const TRANSITION_NAV_MS = TRANSITION_ZOOM_MS + POST_ZOOM_HOLD_MS;
 const formatCoord = (n) => `${n >= 0 ? "" : "-"}${Math.abs(n).toFixed(2)}°`;
 
-function LandingPage({ routeTransition, onBeginRouteTransition }) {
+function LandingPage({ routeTransition, onBeginRouteTransition, onOpenSystemBriefing }) {
   const [presetId, setPresetId] = useState("arctic");
   const [custom, setCustom] = useState(null); // { lat, lng } | null
   const [activeKind, setActiveKind] = useState("preset"); // "preset" | "custom"
@@ -118,6 +119,13 @@ function LandingPage({ routeTransition, onBeginRouteTransition }) {
             <div className="lf-overlay__eyebrow">Land Autonomy Systems</div>
             <div className="lf-overlay__title">LANDFORGE</div>
           </div>
+          <button
+            type="button"
+            className="lf-overlay__briefing"
+            onClick={onOpenSystemBriefing}
+          >
+            System Brief
+          </button>
         </header>
 
         <div className="lf-picker">
@@ -192,10 +200,13 @@ export default function App() {
         data-active={isLandingRoute}
         aria-hidden={!isLandingRoute}
       >
-        <LandingPage
-          routeTransition={routeTransition}
-          onBeginRouteTransition={beginRouteTransition}
-        />
+        {isLandingRoute && (
+          <LandingPage
+            routeTransition={routeTransition}
+            onBeginRouteTransition={beginRouteTransition}
+            onOpenSystemBriefing={() => navigate("/system")}
+          />
+        )}
       </div>
       <div
         className="app-route-layer app-route-layer--mission"
@@ -205,6 +216,8 @@ export default function App() {
         {!isLandingRoute && (
           <Routes>
             <Route path="/mission/:theaterId" element={<TheaterWorkbench />} />
+            <Route path="/system" element={<SystemBrief />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         )}
       </div>

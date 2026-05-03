@@ -11,6 +11,12 @@ const VEHICLE_FACTORIES = {
   drone: { globalKey: "RavenAirThreeJS", factoryKey: "createRavenAirSurrogate" },
 };
 
+const DRONE_DISPLAY_FLIGHT = Object.freeze({
+  bankRadians: 0.2,
+  pitchRadians: 0.045,
+  propSpinRadiansPerSecond: 76,
+});
+
 function getFactory(vehicleId) {
   const cfg = VEHICLE_FACTORIES[vehicleId];
   if (!cfg) return null;
@@ -30,7 +36,10 @@ export function VehicleScene({ vehicleId, terrainBacked = false }) {
 
     const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 200);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+    });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     mount.appendChild(renderer.domElement);
@@ -122,6 +131,8 @@ export function VehicleScene({ vehicleId, terrainBacked = false }) {
     if (vehicleId === "drone") {
       assetWrapper.position.y += 0.6;
     }
+    const basePosition = assetWrapper.position.clone();
+    const baseRotation = assetWrapper.rotation.clone();
 
     // Frame camera against actual asset size
     const radius = Math.max(size.x, size.y, size.z) * 0.5;
@@ -165,11 +176,27 @@ export function VehicleScene({ vehicleId, terrainBacked = false }) {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       if (vehicleId === "drone") {
-        assetWrapper.position.y =
-          (size.y * 0.5 + 0.6) + Math.sin(now / 1400) * 0.05;
+        const t = now * 0.001;
+        const travel = Math.sin(t * 0.78);
+        const turn = Math.cos(t * 0.78);
+        assetWrapper.position.set(
+          basePosition.x + travel * 0.28,
+          basePosition.y + Math.sin(t * 1.8) * 0.07 + Math.sin(t * 0.7) * 0.035,
+          basePosition.z + turn * 0.18,
+        );
+        assetWrapper.rotation.set(
+          baseRotation.x + Math.sin(t * 1.45) * DRONE_DISPLAY_FLIGHT.pitchRadians,
+          baseRotation.y + turn * 0.1,
+          baseRotation.z - travel * DRONE_DISPLAY_FLIGHT.bankRadians,
+        );
       }
       if (asset && typeof asset.update === "function") {
-        asset.update(dt);
+        asset.update(
+          dt,
+          vehicleId === "drone"
+            ? { propSpinRadiansPerSecond: DRONE_DISPLAY_FLIGHT.propSpinRadiansPerSecond }
+            : undefined,
+        );
       }
       controls.update();
       renderer.render(scene, camera);
