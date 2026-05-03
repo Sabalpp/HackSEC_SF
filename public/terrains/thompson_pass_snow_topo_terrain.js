@@ -679,17 +679,43 @@ function plantSnowToppedPine(
   trunkMatrices.push(dummy.matrix.clone());
 
   const lowerRadius = totalHeight * randomRange(random, 0.135, 0.225) * crownSpread;
+  const lowerRadiusX = lowerRadius * crownOvalX * randomRange(random, 0.88, 1.16);
+  const lowerRadiusZ = lowerRadius * crownOvalZ * randomRange(random, 0.86, 1.18);
+  const lowerSnowRadiusFactor = randomRange(random, 0.78, 0.94);
+
   const middleRadius = totalHeight * randomRange(random, 0.095, 0.165) * crownSpread;
+  const middleRadiusX = Math.min(
+    middleRadius * crownOvalX * randomRange(random, 0.82, 1.18),
+    lowerRadiusX * randomRange(random, 0.48, 0.68),
+    lowerRadiusX * lowerSnowRadiusFactor * randomRange(random, 0.76, 0.92),
+  );
+  const middleRadiusZ = Math.min(
+    middleRadius * crownOvalZ * randomRange(random, 0.84, 1.18),
+    lowerRadiusZ * randomRange(random, 0.48, 0.68),
+    lowerRadiusZ * lowerSnowRadiusFactor * randomRange(random, 0.76, 0.92),
+  );
+  const middleSnowRadiusFactor = randomRange(random, 0.78, 0.94);
+
   const upperRadius = totalHeight * randomRange(random, 0.062, 0.125) * crownSpread;
+  const upperRadiusX = Math.min(
+    upperRadius * crownOvalX * randomRange(random, 0.76, 1.22),
+    middleRadiusX * randomRange(random, 0.46, 0.68),
+    middleRadiusX * middleSnowRadiusFactor * randomRange(random, 0.76, 0.92),
+  );
+  const upperRadiusZ = Math.min(
+    upperRadius * crownOvalZ * randomRange(random, 0.78, 1.22),
+    middleRadiusZ * randomRange(random, 0.46, 0.68),
+    middleRadiusZ * middleSnowRadiusFactor * randomRange(random, 0.76, 0.92),
+  );
 
   const layers = [
     {
       bottom: ground + trunkHeight * randomRange(random, 0.3, 0.56),
       height: totalHeight * randomRange(random, 0.43, 0.58),
-      radiusX: lowerRadius * crownOvalX * randomRange(random, 0.88, 1.16),
-      radiusZ: lowerRadius * crownOvalZ * randomRange(random, 0.86, 1.18),
+      radiusX: lowerRadiusX,
+      radiusZ: lowerRadiusZ,
       snowHeight: totalHeight * randomRange(random, 0.13, 0.25),
-      snowRadiusFactor: randomRange(random, 0.62, 0.84),
+      snowRadiusFactor: lowerSnowRadiusFactor,
       yawOffset: randomRange(random, -0.28, 0.28),
       offsetX: randomRange(random, -layerJitter, layerJitter),
       offsetZ: randomRange(random, -layerJitter, layerJitter),
@@ -697,10 +723,10 @@ function plantSnowToppedPine(
     {
       bottom: ground + trunkHeight + totalHeight * randomRange(random, 0.08, 0.18),
       height: totalHeight * randomRange(random, 0.34, 0.48),
-      radiusX: middleRadius * crownOvalX * randomRange(random, 0.82, 1.18),
-      radiusZ: middleRadius * crownOvalZ * randomRange(random, 0.84, 1.18),
+      radiusX: middleRadiusX,
+      radiusZ: middleRadiusZ,
       snowHeight: totalHeight * randomRange(random, 0.12, 0.23),
-      snowRadiusFactor: randomRange(random, 0.66, 0.88),
+      snowRadiusFactor: middleSnowRadiusFactor,
       yawOffset: randomRange(random, -0.35, 0.35),
       offsetX: randomRange(random, -layerJitter, layerJitter),
       offsetZ: randomRange(random, -layerJitter, layerJitter),
@@ -708,10 +734,10 @@ function plantSnowToppedPine(
     {
       bottom: ground + trunkHeight + totalHeight * randomRange(random, 0.28, 0.4),
       height: totalHeight * randomRange(random, 0.28, 0.42),
-      radiusX: upperRadius * crownOvalX * randomRange(random, 0.76, 1.22),
-      radiusZ: upperRadius * crownOvalZ * randomRange(random, 0.78, 1.22),
+      radiusX: upperRadiusX,
+      radiusZ: upperRadiusZ,
       snowHeight: totalHeight * randomRange(random, 0.11, 0.22),
-      snowRadiusFactor: randomRange(random, 0.72, 0.94),
+      snowRadiusFactor: randomRange(random, 0.76, 0.9),
       yawOffset: randomRange(random, -0.42, 0.42),
       offsetX: randomRange(random, -layerJitter, layerJitter),
       offsetZ: randomRange(random, -layerJitter, layerJitter),
