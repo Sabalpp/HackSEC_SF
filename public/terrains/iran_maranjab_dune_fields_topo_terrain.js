@@ -44,9 +44,9 @@ const ROCK_SAND_REVEAL_METERS = 0.12;
 
 const MATERIALS = {
   rock: new THREE.MeshStandardMaterial({
-    color: 0x7b715f,
-    roughness: 0.96,
-    metalness: 0.02,
+    color: 0x8a806d,
+    roughness: 0.98,
+    metalness: 0,
   }),
   contourMinor: new THREE.LineBasicMaterial({
     color: 0x907d64,
@@ -326,6 +326,28 @@ function interduneFloorQualityAt(xMetersEast, zMetersNorth) {
   return (valleyScore * 0.55 + flatScore * 0.25 + pocketScore * 0.2) * edgeScore;
 }
 
+function dryWashFloorScoreAt(xMetersEast, zMetersNorth) {
+  const { u, v } = desertFrame(xMetersEast, zMetersNorth);
+  const channels = [
+    { offset: -132, width: 32, alongCenter: -160, alongScale: 470 },
+    { offset: 214, width: 28, alongCenter: 160, alongScale: 410 },
+    { offset: 32, width: 22, alongCenter: 0, alongScale: 520 },
+  ];
+
+  let score = 0;
+
+  for (const channel of channels) {
+    const wanderingU = channel.offset + 18 * Math.sin(v * 0.013 + channel.offset * 0.02);
+    const across = u - wanderingU;
+    const channelScore =
+      Math.exp(-Math.pow(across / channel.width, 2)) *
+      Math.exp(-Math.pow((v - channel.alongCenter) / channel.alongScale, 2));
+    score = Math.max(score, channelScore);
+  }
+
+  return score;
+}
+
 function addLighting(scene) {
   const hemisphere = new THREE.HemisphereLight(0xfff0d8, 0x8a6f52, 1.72);
   scene.add(hemisphere);
@@ -587,81 +609,63 @@ function addRockOutcrops(scene) {
   const random = mulberry32(SEED + 910);
   const geometry = new THREE.DodecahedronGeometry(1, 0);
   const matrices = [];
+  const selected = [];
+  const candidates = [];
   const dummy = new THREE.Object3D();
-  const targetCount = 118;
-  let attempts = 0;
+  const targetCount = 18;
 
-  while (matrices.length < targetCount && attempts < targetCount * 18) {
-    attempts += 1;
+  for (let z = -HALF_TERRAIN + 48; z <= HALF_TERRAIN - 48; z += 24) {
+    for (let x = -HALF_TERRAIN + 48; x <= HALF_TERRAIN - 48; x += 24) {
+      const jitteredX = x + randomRange(random, -8, 8);
+      const jitteredZ = z + randomRange(random, -8, 8);
+      const slope = terrainSlopeAt(jitteredX, jitteredZ);
 
-    const valleyBiased = random() < 0.58;
-    const candidate = valleyBiased ? randomInterduneRockPoint(random) : randomTerrainPoint(random, 22);
-    const slope = terrainSlopeAt(candidate.x, candidate.z);
-    const elevation = terrainElevationMetersAt(candidate.x, candidate.z);
-    const valleyProximity = duneValleyScoreAt(candidate.x, candidate.z);
-    const relativeHeight = THREE.MathUtils.clamp((elevation + 45) / 235, 0, 1);
+      if (slope > 0.105) continue;
 
-    if (valleyBiased && valleyProximity < 0.2 && random() < 0.72) {
+      const floorQuality = interduneFloorQualityAt(jitteredX, jitteredZ);
+      const washQuality = dryWashFloorScoreAt(jitteredX, jitteredZ);
+      const placementScore = Math.max(floorQuality, washQuality * 0.82);
+
+      if (placementScore < 0.34) continue;
+      if (fbm(jitteredX * 0.018 + 5, jitteredZ * 0.018 - 11, 3) < 0.5) continue;
+
+      candidates.push({
+        x: jitteredX,
+        z: jitteredZ,
+        slope,
+        quality: placementScore + random() * 0.08,
+      });
+    }
+  }
+
+  candidates.sort((a, b) => b.quality - a.quality);
+
+  for (const candidate of candidates) {
+    if (matrices.length >= targetCount) break;
+    if (selected.some((position) => Math.hypot(position.x - candidate.x, position.z - candidate.z) < 74)) {
       continue;
     }
 
-    if (!valleyBiased && slope < 0.22 && random() < 0.75) {
-      continue;
-    }
+    const yaw = randomRange(random, 0, Math.PI * 2);
+    const longAxis = randomRange(random, 1.1, 4.4);
+    const heightAxis = randomRange(random, 0.14, 0.36);
+    const depthAxis = randomRange(random, 0.65, 2.05);
+    const y = rockFootprintHeightMetersAt(candidate.x, candidate.z, yaw, longAxis, depthAxis);
 
-    if (valleyProximity > 0.93 && random() < 0.58) {
-      continue;
-    }
-
-    const valleyBoulderScale = randomRange(random, 3.2, 7.4) * valleyProximity * (1 - relativeHeight * 0.48);
-    const highOutcropScale = randomRange(random, 0.45, 2.35) * (0.72 + slope * 1.1);
-    const scale = Math.max(0.7, valleyBoulderScale + highOutcropScale * (0.42 + relativeHeight * 0.72));
-    const longAxis = randomRange(random, 0.75, 1.85) * (1 + valleyProximity * 0.42);
-    const heightAxis = randomRange(random, 0.18, 0.52) * (1 - valleyProximity * 0.16);
-    const depthAxis = randomRange(random, 0.58, 1.5) * (1 + slope * 0.45);
-    const yaw = random() * Math.PI;
-    const scaledLongAxis = scale * longAxis;
-    const scaledHeightAxis = scale * heightAxis;
-    const scaledDepthAxis = scale * depthAxis;
-    const y = rockFootprintHeightMetersAt(candidate.x, candidate.z, yaw, scaledLongAxis, scaledDepthAxis);
-
-    dummy.position.set(candidate.x, y + scaledHeightAxis + ROCK_SAND_REVEAL_METERS, candidate.z);
-    dummy.rotation.set(random() * Math.PI, yaw, random() * Math.PI);
-    dummy.scale.set(scaledLongAxis, scaledHeightAxis, scaledDepthAxis);
+    dummy.position.set(candidate.x, y + heightAxis * 0.82 + ROCK_SAND_REVEAL_METERS, candidate.z);
+    dummy.rotation.set(randomRange(random, -0.08, 0.08), yaw, randomRange(random, -0.08, 0.08));
+    dummy.scale.set(longAxis, heightAxis, depthAxis);
     dummy.updateMatrix();
     matrices.push(dummy.matrix.clone());
+    selected.push(candidate);
   }
 
   const rocks = new THREE.InstancedMesh(geometry, MATERIALS.rock, matrices.length);
-  rocks.name = "Alaska-style wind-scoured rock outcrops";
+  rocks.name = "sparse low desert stones in interdune and wash floors";
   rocks.castShadow = true;
   rocks.receiveShadow = true;
   matrices.forEach((matrix, index) => rocks.setMatrixAt(index, matrix));
   scene.add(rocks);
-}
-
-function randomTerrainPoint(random, edgePadding) {
-  return {
-    x: randomRange(random, -HALF_TERRAIN + edgePadding, HALF_TERRAIN - edgePadding),
-    z: randomRange(random, -HALF_TERRAIN + edgePadding, HALF_TERRAIN - edgePadding),
-  };
-}
-
-function randomInterduneRockPoint(random) {
-  let best = randomTerrainPoint(random, 22);
-  let bestScore = duneValleyScoreAt(best.x, best.z);
-
-  for (let i = 0; i < 7; i += 1) {
-    const candidate = randomTerrainPoint(random, 22);
-    const score = duneValleyScoreAt(candidate.x, candidate.z);
-
-    if (score > bestScore) {
-      best = candidate;
-      bestScore = score;
-    }
-  }
-
-  return best;
 }
 
 function rockFootprintHeightMetersAt(x, z, yaw, radiusX, radiusZ) {
