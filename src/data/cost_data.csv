@@ -1,0 +1,29 @@
+vehicle_id,unit_label,source_component,report_component,subsystem,parent,replacement_cost_usd,inspection_cost_usd
+ugv,Land Unit,Frame,Frame,chassis,false,7000,800
+ugv,Land Unit,Plating,Plating,chassis,false,5000,600
+ugv,Land Unit,Suspension,Suspension,chassis,false,7500,900
+ugv,Land Unit,Underbelly,Underbelly,chassis,false,4500,600
+ugv,Land Unit,Track / wheels,Track / wheels,chassis,false,8500,1000
+ugv,Land Unit,Hatches & doors,Hatches & doors,chassis,false,2500,350
+ugv,Land Unit,Thermal,Thermal,sensors,false,14000,900
+ugv,Land Unit,Radar,Radar,sensors,false,22000,1100
+ugv,Land Unit,Acoustic,Acoustic,sensors,false,6000,450
+ugv,Land Unit,GPS,GPS,sensors,false,3500,350
+ugv,Land Unit,Camera,Camera,sensors,false,4500,350
+ugv,Land Unit,Battery,Battery,battery,true,12000,600
+ugv,Land Unit,Engine,Engine,engine,true,18000,1200
+ugv,Land Unit,Hydraulics,Hydraulics,hydraulics,true,9000,900
+drone,Air Unit,Frame,Airframe,chassis,false,11000,900
+drone,Air Unit,Plating,Skin panels,chassis,false,8000,650
+drone,Air Unit,Suspension,Landing gear,chassis,false,6500,700
+drone,Air Unit,Underbelly,Lower fuselage,chassis,false,6200,550
+drone,Air Unit,Track / wheels,Propulsor assembly,chassis,false,18000,1200
+drone,Air Unit,Hatches & doors,Access panels,chassis,false,3600,350
+drone,Air Unit,Thermal,Thermal payload,sensors,false,16000,950
+drone,Air Unit,Radar,Radar payload,sensors,false,26000,1300
+drone,Air Unit,Acoustic,Acoustic package,sensors,false,7200,500
+drone,Air Unit,GPS,GNSS / GPS,sensors,false,4200,350
+drone,Air Unit,Camera,EO camera,sensors,false,7800,550
+drone,Air Unit,Battery,Flight battery,battery,true,14500,700
+drone,Air Unit,Engine,Motor / engine,engine,true,24000,1400
+drone,Air Unit,Hydraulics,Actuators,hydraulics,true,12500,900

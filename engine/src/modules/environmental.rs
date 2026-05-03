@@ -1,5 +1,6 @@
 use crate::*;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 const ACTIVE_FACTOR_EPSILON: f64 = 1e-12;
 
@@ -75,6 +76,7 @@ pub struct DiagnosticsSubsystems {
 #[derive(Debug, Clone, Serialize)]
 pub struct DiagnosticsSnapshot {
     pub subsystems: DiagnosticsSubsystems,
+    pub components: BTreeMap<&'static str, SubsystemDiagnostic>,
 }
 
 impl Default for DiagnosticsSnapshot {
@@ -85,14 +87,26 @@ impl Default for DiagnosticsSnapshot {
 
 impl DiagnosticsSnapshot {
     pub fn from_factor_contributions(contributions: &[EnvironmentalFactorContribution]) -> Self {
+        Self::from_state_factor_contributions(&VehicleState::default(), contributions)
+    }
+
+    pub fn from_state_factor_contributions(
+        state: &VehicleState,
+        contributions: &[EnvironmentalFactorContribution],
+    ) -> Self {
         Self {
             subsystems: DiagnosticsSubsystems {
-                chassis: diagnostic_for_subsystem(SubsystemKind::Chassis, contributions),
-                sensors: diagnostic_for_subsystem(SubsystemKind::Sensors, contributions),
-                battery: diagnostic_for_subsystem(SubsystemKind::Battery, contributions),
-                engine: diagnostic_for_subsystem(SubsystemKind::Engine, contributions),
-                hydraulics: diagnostic_for_subsystem(SubsystemKind::Hydraulics, contributions),
+                chassis: diagnostic_for_subsystem(state, SubsystemKind::Chassis, contributions),
+                sensors: diagnostic_for_subsystem(state, SubsystemKind::Sensors, contributions),
+                battery: diagnostic_for_subsystem(state, SubsystemKind::Battery, contributions),
+                engine: diagnostic_for_subsystem(state, SubsystemKind::Engine, contributions),
+                hydraulics: diagnostic_for_subsystem(
+                    state,
+                    SubsystemKind::Hydraulics,
+                    contributions,
+                ),
             },
+            components: diagnostics_for_components(&state.components, contributions),
         }
     }
 }
@@ -171,14 +185,26 @@ pub fn evaluate_environmental_modules(
     let contributions = compute_factor_contributions(&vehicle.properties, sample);
     let mut derivatives = HealthDerivatives::default();
     for contribution in &contributions {
-        derivatives.add(contribution.derivatives);
+        derivatives.add(vehicle.state.effective_factor_derivatives(contribution));
     }
-    let diagnostics = DiagnosticsSnapshot::from_factor_contributions(&contributions);
+    let diagnostics =
+        DiagnosticsSnapshot::from_state_factor_contributions(&vehicle.state, &contributions);
 
     vehicle
         .state
-        .subsystems
-        .apply_derivatives(derivatives, dt_s);
+        .components
+        .apply_factor_contributions(&contributions, dt_s);
+    vehicle.state.subsystems.apply_derivatives(
+        HealthDerivatives {
+            engine: derivatives.engine,
+            battery: derivatives.battery,
+            hydraulics: derivatives.hydraulics,
+            sensors: 0.0,
+            chassis: 0.0,
+        },
+        dt_s,
+    );
+    vehicle.state.update_component_aggregates();
     vehicle.state.elapsed_s += dt_s.max(0.0);
     vehicle.state.frame += 1;
     vehicle.state.update_vehicle_health();
@@ -287,13 +313,65 @@ pub fn uv_solar_radiation(properties: &VehicleProperties, irradiance: f64) -> He
 }
 
 fn diagnostic_for_subsystem(
+    state: &VehicleState,
     subsystem: SubsystemKind,
     contributions: &[EnvironmentalFactorContribution],
 ) -> SubsystemDiagnostic {
     let mut factors: Vec<FactorDiagnostic> = contributions
         .iter()
         .filter_map(|contribution| {
-            let dx_dt = contribution.derivatives.for_subsystem(subsystem);
+            let dx_dt = state
+                .effective_factor_derivatives(contribution)
+                .for_subsystem(subsystem);
+            (dx_dt.abs() > ACTIVE_FACTOR_EPSILON).then_some(FactorDiagnostic {
+                id: contribution.id,
+                label: contribution.label,
+                dx_dt,
+            })
+        })
+        .collect();
+
+    factors.sort_by(|left, right| {
+        right
+            .dx_dt
+            .abs()
+            .total_cmp(&left.dx_dt.abs())
+            .then_with(|| left.id.cmp(right.id))
+    });
+
+    let dx_dt = factors.iter().map(|factor| factor.dx_dt).sum::<f64>();
+
+    SubsystemDiagnostic {
+        dx_dt: clean_zero(dx_dt),
+        factors,
+    }
+}
+
+fn diagnostics_for_components(
+    components: &ComponentHealth,
+    contributions: &[EnvironmentalFactorContribution],
+) -> BTreeMap<&'static str, SubsystemDiagnostic> {
+    CHASSIS_COMPONENT_IDS
+        .iter()
+        .chain(SENSOR_COMPONENT_IDS.iter())
+        .map(|component_id| {
+            (
+                *component_id,
+                diagnostic_for_component(components, component_id, contributions),
+            )
+        })
+        .collect()
+}
+
+fn diagnostic_for_component(
+    components: &ComponentHealth,
+    component_id: &str,
+    contributions: &[EnvironmentalFactorContribution],
+) -> SubsystemDiagnostic {
+    let mut factors: Vec<FactorDiagnostic> = contributions
+        .iter()
+        .filter_map(|contribution| {
+            let dx_dt = components.effective_component_derivative(component_id, contribution);
             (dx_dt.abs() > ACTIVE_FACTOR_EPSILON).then_some(FactorDiagnostic {
                 id: contribution.id,
                 label: contribution.label,

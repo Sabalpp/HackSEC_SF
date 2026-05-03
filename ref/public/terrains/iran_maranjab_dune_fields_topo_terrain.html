@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Iran Maranjab Dune Fields Topographic Terrain</title>
+    <style>
+      html,
+      body,
+      #terrain-root {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        background: #d7eefb;
+      }
+
+      canvas {
+        display: block;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.164.1/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.164.1/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="terrain-root"></div>
+    <script type="module">
+      import { createIranMaranjabDuneFieldsScene } from "./iran_maranjab_dune_fields_topo_terrain.js";
+
+      createIranMaranjabDuneFieldsScene("#terrain-root");
+    </script>
+  </body>
+</html>

@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import initPhysicsEngine, { Engine as PhysicsEngine } from "../../pkg/engine.js";
 import { theaters } from "../data/theaters";
+import { vehicles } from "../data/vehicles";
+import costDataCsv from "../data/cost_data.csv?raw";
 import { TheaterEnvironment } from "./TheaterEnvironment";
 import landforgeIcon from "../assets/landforge-icon.png";
 
@@ -55,7 +57,13 @@ const ENVIRONMENT_DEFAULTS_BY_THEATER = {
 };
 
 const buildEnvironmentDefaults = (theaterId) => ({
-  ...(ENVIRONMENT_DEFAULTS_BY_THEATER[theaterId] ?? ENVIRONMENT_DEFAULTS_BY_THEATER.arctic),
+  ...(() => {
+    const defaults = ENVIRONMENT_DEFAULTS_BY_THEATER[theaterId] ?? ENVIRONMENT_DEFAULTS_BY_THEATER.arctic;
+    return {
+      ...defaults,
+      componentMaterials: buildDefaultComponentMaterials(defaults.material),
+    };
+  })(),
 });
 
 const parseDurationDays = (value) => {
@@ -84,6 +92,44 @@ const CALENDAR_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
   day: "numeric",
   year: "numeric",
 });
+const COST_FORMATTER = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+const WEIGHT_FORMATTER = new Intl.NumberFormat("en-US", {
+  maximumFractionDigits: 1,
+});
+const COST_SOURCE_NOTE = "Cost values are planning assumptions; component and environment triggers come from the Skunk Works dataset PDFs.";
+
+const parseCostDataCsv = (csv) => {
+  const [headerLine, ...lines] = csv.trim().split(/\r?\n/);
+  const headers = headerLine.split(",");
+
+  return lines.reduce((groups, line) => {
+    const values = line.split(",");
+    const row = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""]));
+    const vehicleId = row.vehicle_id || "ugv";
+    const baseline = {
+      sourceLabel: row.source_component,
+      label: row.report_component,
+      subsystem: row.subsystem,
+      parent: row.parent === "true",
+      replacementCost: Number(row.replacement_cost_usd) || 0,
+      inspectionCost: Number(row.inspection_cost_usd) || 0,
+    };
+
+    return {
+      ...groups,
+      [vehicleId]: [...(groups[vehicleId] ?? []), baseline],
+    };
+  }, {});
+};
+
+const COST_COMPONENT_BASELINES_BY_VEHICLE = parseCostDataCsv(costDataCsv);
+const COST_DATASET_ROW_COUNT = Math.max(
+  ...Object.values(COST_COMPONENT_BASELINES_BY_VEHICLE).map((rows) => rows.length),
+);
 
 let physicsEngineInitPromise = null;
 
@@ -104,6 +150,27 @@ const MATERIAL_OPTIONS = [
   "GRPFiberglass",
   "CFRPCarbonFiber",
   "TitaniumGrade5",
+  "KevlarComposite",
+  "CeramicComposite",
+  "PolyurethaneCoating",
+  "TungstenCarbide",
+  "RubberCompound",
+  "Germanium",
+  "SapphireGlass",
+  "Polyimide",
+  "GalliumArsenide",
+  "PiezoelectricCeramic",
+  "Silicon",
+  "BorosilicateGlass",
+  "LithiumCompound",
+  "NickelAlloy",
+  "Polypropylene",
+  "CastIron",
+  "NickelSuperalloy",
+  "ChromolySteel",
+  "NitrileRubber",
+  "StainlessSteel",
+  "PhosphateEsterFluid",
 ];
 
 const MATERIAL_ENGINE_KEYS = {
@@ -118,6 +185,158 @@ const MATERIAL_ENGINE_KEYS = {
   GRPFiberglass: "GRP",
   CFRPCarbonFiber: "CFRP",
   TitaniumGrade5: "TiGrade5",
+  KevlarComposite: "KevlarComposite",
+  CeramicComposite: "CeramicComposite",
+  PolyurethaneCoating: "PolyurethaneCoating",
+  TungstenCarbide: "TungstenCarbide",
+  RubberCompound: "RubberCompound",
+  Germanium: "Germanium",
+  SapphireGlass: "SapphireGlass",
+  Polyimide: "Polyimide",
+  GalliumArsenide: "GalliumArsenide",
+  PiezoelectricCeramic: "PiezoelectricCeramic",
+  Silicon: "Silicon",
+  BorosilicateGlass: "BorosilicateGlass",
+  LithiumCompound: "LithiumCompound",
+  NickelAlloy: "NickelAlloy",
+  Polypropylene: "Polypropylene",
+  CastIron: "CastIron",
+  NickelSuperalloy: "NickelSuperalloy",
+  ChromolySteel: "ChromolySteel",
+  NitrileRubber: "NitrileRubber",
+  StainlessSteel: "StainlessSteel",
+  PhosphateEsterFluid: "PhosphateEsterFluid",
+};
+
+const MATERIAL_LABELS = {
+  MildSteelTemperate: "MildSteelTemperate",
+  MildSteelColdWeather: "MildSteelColdWeather",
+  HighStrengthAH36: "AH36 Steel",
+  HighStrengthDH36: "DH36 Steel",
+  HighStrengthEH36: "EH36 Steel",
+  UltraHighStrengthEH40: "EH40 Steel",
+  Aluminum5083: "Aluminum5083",
+  Aluminum5086: "Aluminum5086",
+  GRPFiberglass: "GRP Fiberglass",
+  CFRPCarbonFiber: "CFRP Carbon Fiber",
+  TitaniumGrade5: "Titanium Grade 5",
+  KevlarComposite: "Kevlar Composite",
+  CeramicComposite: "Ceramic Composite",
+  PolyurethaneCoating: "Polyurethane Coating",
+  TungstenCarbide: "Tungsten Carbide",
+  RubberCompound: "Rubber Compound",
+  Germanium: "Germanium",
+  SapphireGlass: "Sapphire Glass",
+  Polyimide: "Polyimide",
+  GalliumArsenide: "Gallium Arsenide",
+  PiezoelectricCeramic: "Piezoelectric Ceramic",
+  Silicon: "Silicon",
+  BorosilicateGlass: "Borosilicate Glass",
+  LithiumCompound: "Lithium Compound",
+  NickelAlloy: "Nickel Alloy",
+  Polypropylene: "Polypropylene",
+  CastIron: "Cast Iron",
+  NickelSuperalloy: "Nickel Superalloy",
+  ChromolySteel: "Chromoly Steel",
+  NitrileRubber: "Nitrile Rubber",
+  StainlessSteel: "Stainless Steel",
+  PhosphateEsterFluid: "Phosphate Ester Fluid",
+};
+
+const materialLabel = (material) => MATERIAL_LABELS[material] ?? material;
+
+const materialEngineKey = (material) => MATERIAL_ENGINE_KEYS[material] ?? material;
+
+const MATERIAL_UI_KEY_BY_ENGINE_GRADE = MATERIAL_OPTIONS.reduce((lookup, material) => ({
+  ...lookup,
+  [materialEngineKey(material)]: material,
+}), {});
+
+const buildFallbackMaterialCatalog = () => (
+  Object.fromEntries(
+    MATERIAL_OPTIONS.map((material) => [
+      material,
+      {
+        grade: materialEngineKey(material),
+        label: materialLabel(material),
+        strength_index: null,
+        cost: null,
+        cost_unit: "",
+      },
+    ]),
+  )
+);
+
+const normalizeMaterialCatalog = (materialsJson) => {
+  const catalog = buildFallbackMaterialCatalog();
+
+  try {
+    const materials = JSON.parse(materialsJson);
+    if (!Array.isArray(materials)) return catalog;
+
+    materials.forEach((material) => {
+      const grade = String(material?.grade ?? "");
+      if (!grade) return;
+
+      const normalized = {
+        ...material,
+        grade,
+        label: String(material.label ?? MATERIAL_LABELS[grade] ?? grade),
+        strength_index: Number.isFinite(Number(material.strength_index))
+          ? Number(material.strength_index)
+          : null,
+        cost: Number.isFinite(Number(material.cost)) ? Number(material.cost) : null,
+        cost_unit: String(material.cost_unit ?? ""),
+      };
+      const uiMaterial = MATERIAL_UI_KEY_BY_ENGINE_GRADE[grade] ?? grade;
+      catalog[uiMaterial] = normalized;
+      catalog[grade] = normalized;
+    });
+  } catch (error) {
+    console.error("Unable to parse material catalog", error);
+  }
+
+  return catalog;
+};
+
+const metadataForMaterial = (materialCatalog, material) => {
+  const metadata = materialCatalog?.[material] ?? materialCatalog?.[materialEngineKey(material)];
+
+  return {
+    grade: materialEngineKey(material),
+    label: materialLabel(material),
+    strength_index: null,
+    cost: null,
+    cost_unit: "",
+    ...metadata,
+  };
+};
+
+const formatMaterialStrength = (metadata) => {
+  const strength = Number(metadata?.strength_index);
+  return Number.isFinite(strength) ? strength.toFixed(2) : "n/a";
+};
+
+const formatMaterialCost = (metadata) => {
+  const cost = Number(metadata?.cost);
+  if (!Number.isFinite(cost)) return "n/a";
+
+  const unit = String(metadata?.cost_unit ?? "").replace(/^USD\//, "");
+  const formatted = cost.toLocaleString("en-US", {
+    minimumFractionDigits: cost < 10 ? 2 : 0,
+    maximumFractionDigits: cost < 10 ? 2 : 1,
+  });
+
+  return unit ? `$${formatted}/${unit}` : `$${formatted}`;
+};
+
+const formatTotalMaterialCost = (value) => (
+  Number.isFinite(Number(value)) ? COST_FORMATTER.format(Number(value)) : "n/a"
+);
+
+const formatEstimatedWeightKg = (value) => {
+  const weight = Number(value);
+  return Number.isFinite(weight) ? `${WEIGHT_FORMATTER.format(weight)} kg` : "n/a";
 };
 
 const VEHICLE_HEALTH_GROUPS = [
@@ -303,6 +522,332 @@ const FAILURE_IMPORTANCE_BY_SUBSYSTEM = {
 };
 
 const REPORT_FAILURE_ITEMS = REPORT_HEALTH_ITEMS.filter((item) => !item.overall);
+
+const COMPONENT_MATERIAL_SECTIONS = REPORT_HEALTH_SECTIONS.map((section) => ({
+  id: section.id,
+  label: section.label,
+  items: section.parent ? section.children : section.items,
+}));
+
+const COMPONENT_MATERIAL_ITEMS = COMPONENT_MATERIAL_SECTIONS.flatMap((section) => section.items);
+
+const COMPONENT_MATERIAL_OPTIONS = {
+  "chassis-frame": [
+    "MildSteelTemperate",
+    "MildSteelColdWeather",
+    "HighStrengthAH36",
+    "HighStrengthDH36",
+    "HighStrengthEH36",
+    "UltraHighStrengthEH40",
+    "KevlarComposite",
+    "CeramicComposite",
+  ],
+  "chassis-plating": [
+    "HighStrengthAH36",
+    "HighStrengthDH36",
+    "HighStrengthEH36",
+    "UltraHighStrengthEH40",
+    "Aluminum5083",
+    "Aluminum5086",
+    "CeramicComposite",
+    "KevlarComposite",
+    "PolyurethaneCoating",
+    "TungstenCarbide",
+  ],
+  "chassis-suspension": [
+    "MildSteelTemperate",
+    "MildSteelColdWeather",
+    "HighStrengthAH36",
+    "HighStrengthDH36",
+    "RubberCompound",
+    "PolyurethaneCoating",
+  ],
+  "chassis-underbelly": [
+    "HighStrengthAH36",
+    "HighStrengthDH36",
+    "HighStrengthEH36",
+    "UltraHighStrengthEH40",
+    "TitaniumGrade5",
+    "CeramicComposite",
+    "KevlarComposite",
+  ],
+  "chassis-track-wheels": [
+    "MildSteelTemperate",
+    "MildSteelColdWeather",
+    "HighStrengthAH36",
+    "RubberCompound",
+    "TungstenCarbide",
+    "PolyurethaneCoating",
+  ],
+  "chassis-hatches-doors": [
+    "HighStrengthAH36",
+    "Aluminum5083",
+    "Aluminum5086",
+    "RubberCompound",
+    "KevlarComposite",
+  ],
+  "sensors-thermal": [
+    "Aluminum5083",
+    "Aluminum5086",
+    "CFRPCarbonFiber",
+    "TitaniumGrade5",
+    "Germanium",
+    "SapphireGlass",
+    "Polyimide",
+  ],
+  "sensors-radar": [
+    "Aluminum5083",
+    "Aluminum5086",
+    "GRPFiberglass",
+    "CFRPCarbonFiber",
+    "GalliumArsenide",
+    "Polyimide",
+  ],
+  "sensors-acoustic": [
+    "Aluminum5083",
+    "GRPFiberglass",
+    "CFRPCarbonFiber",
+    "PiezoelectricCeramic",
+    "Polyimide",
+  ],
+  "sensors-gps": [
+    "Aluminum5083",
+    "Aluminum5086",
+    "CFRPCarbonFiber",
+    "Silicon",
+    "Polyimide",
+  ],
+  "sensors-camera": [
+    "Aluminum5083",
+    "Aluminum5086",
+    "GRPFiberglass",
+    "CFRPCarbonFiber",
+    "BorosilicateGlass",
+    "SapphireGlass",
+    "Polyimide",
+  ],
+  battery: [
+    "Aluminum5083",
+    "Aluminum5086",
+    "CFRPCarbonFiber",
+    "LithiumCompound",
+    "NickelAlloy",
+    "Polypropylene",
+  ],
+  engine: [
+    "MildSteelTemperate",
+    "MildSteelColdWeather",
+    "HighStrengthAH36",
+    "TitaniumGrade5",
+    "CastIron",
+    "NickelSuperalloy",
+    "ChromolySteel",
+  ],
+  hydraulics: [
+    "MildSteelTemperate",
+    "HighStrengthAH36",
+    "HighStrengthDH36",
+    "TitaniumGrade5",
+    "NitrileRubber",
+    "StainlessSteel",
+    "PhosphateEsterFluid",
+  ],
+};
+
+const materialOptionsForComponent = (componentId) => (
+  COMPONENT_MATERIAL_OPTIONS[componentId] ?? MATERIAL_OPTIONS
+);
+
+const COMPONENT_MATERIAL_PRESETS = [
+  { id: "budget", label: "Budget" },
+  { id: "reasonable", label: "Reasonable" },
+  { id: "top-notch", label: "Top-Notch" },
+];
+
+const materialPresetCost = (materialCatalog, material) => {
+  const cost = Number(metadataForMaterial(materialCatalog, material).cost);
+  return Number.isFinite(cost) ? cost : Number.POSITIVE_INFINITY;
+};
+
+const materialPresetStrength = (materialCatalog, material) => {
+  const strength = Number(metadataForMaterial(materialCatalog, material).strength_index);
+  return Number.isFinite(strength) ? strength : 0;
+};
+
+const compareMaterialsByCost = (materialCatalog, direction) => (materialA, materialB) => {
+  const costA = materialPresetCost(materialCatalog, materialA);
+  const costB = materialPresetCost(materialCatalog, materialB);
+  const hasCostA = Number.isFinite(costA);
+  const hasCostB = Number.isFinite(costB);
+
+  if (hasCostA && !hasCostB) return -1;
+  if (!hasCostA && hasCostB) return 1;
+  if (hasCostA && hasCostB && costA !== costB) return direction * (costA - costB);
+
+  return materialPresetStrength(materialCatalog, materialB) - materialPresetStrength(materialCatalog, materialA);
+};
+
+const selectMaterialForPreset = (componentId, materialCatalog, presetId) => {
+  const options = [...materialOptionsForComponent(componentId)].sort(
+    compareMaterialsByCost(materialCatalog, 1),
+  );
+
+  if (!options.length) return MATERIAL_OPTIONS[0];
+  if (presetId === "top-notch") {
+    return [...options].sort(compareMaterialsByCost(materialCatalog, -1))[0];
+  }
+  if (presetId === "reasonable") return options[Math.floor(options.length / 2)];
+  return options[0];
+};
+
+const buildComponentMaterialPreset = (presetId, materialCatalog) => (
+  Object.fromEntries(
+    COMPONENT_MATERIAL_ITEMS.map((item) => [
+      item.id,
+      selectMaterialForPreset(item.id, materialCatalog, presetId),
+    ]),
+  )
+);
+
+const normalizeComponentMaterial = (componentId, material, fallbackMaterial) => {
+  const options = materialOptionsForComponent(componentId);
+  if (options.includes(material)) return material;
+  if (options.includes(fallbackMaterial)) return fallbackMaterial;
+  return options[0] ?? MATERIAL_OPTIONS[0];
+};
+
+const buildDefaultComponentMaterials = (material) => (
+  Object.fromEntries(
+    COMPONENT_MATERIAL_ITEMS.map((item) => [
+      item.id,
+      normalizeComponentMaterial(item.id, material, material),
+    ]),
+  )
+);
+
+const normalizeComponentMaterials = (componentMaterials, fallbackMaterial) => {
+  const fallback = MATERIAL_OPTIONS.includes(fallbackMaterial)
+    ? fallbackMaterial
+    : MATERIAL_OPTIONS[0];
+
+  return Object.fromEntries(
+    COMPONENT_MATERIAL_ITEMS.map((item) => {
+      const selected = componentMaterials?.[item.id];
+      return [item.id, normalizeComponentMaterial(item.id, selected, fallback)];
+    }),
+  );
+};
+
+const materialSummaryLabel = (inputs) => {
+  const componentMaterials = normalizeComponentMaterials(
+    inputs?.componentMaterials,
+    inputs?.material,
+  );
+  const uniqueMaterials = new Set(Object.values(componentMaterials));
+
+  if (uniqueMaterials.size === 1) {
+    return materialLabel([...uniqueMaterials][0]);
+  }
+
+  return `${uniqueMaterials.size} component materials`;
+};
+
+const COMPONENT_MASS_FRACTIONS_BY_UNIT = {
+  ugv: {
+    "chassis-frame": 0.18,
+    "chassis-plating": 0.14,
+    "chassis-suspension": 0.11,
+    "chassis-underbelly": 0.10,
+    "chassis-track-wheels": 0.18,
+    "chassis-hatches-doors": 0.04,
+    "sensors-thermal": 0.025,
+    "sensors-radar": 0.025,
+    "sensors-acoustic": 0.01,
+    "sensors-gps": 0.01,
+    "sensors-camera": 0.02,
+    battery: 0.07,
+    engine: 0.06,
+    hydraulics: 0.03,
+  },
+  drone: {
+    "chassis-frame": 0.20,
+    "chassis-plating": 0.10,
+    "chassis-suspension": 0.05,
+    "chassis-underbelly": 0.06,
+    "chassis-track-wheels": 0.04,
+    "chassis-hatches-doors": 0.03,
+    "sensors-thermal": 0.055,
+    "sensors-radar": 0.04,
+    "sensors-acoustic": 0.025,
+    "sensors-gps": 0.035,
+    "sensors-camera": 0.065,
+    battery: 0.18,
+    engine: 0.09,
+    hydraulics: 0.03,
+  },
+};
+
+const COMPONENT_ESTIMATE_MASS_KG_BY_UNIT = {
+  ugv: 450,
+  drone: vehicles.drone.massKg,
+};
+
+const COMPONENT_COST_MULTIPLIER = {
+  "chassis-frame": 4.2,
+  "chassis-plating": 3.8,
+  "chassis-suspension": 5.5,
+  "chassis-underbelly": 3.7,
+  "chassis-track-wheels": 5.0,
+  "chassis-hatches-doors": 4.8,
+  "sensors-thermal": 18.0,
+  "sensors-radar": 22.0,
+  "sensors-acoustic": 14.0,
+  "sensors-gps": 16.0,
+  "sensors-camera": 14.0,
+  battery: 3.0,
+  engine: 5.0,
+  hydraulics: 4.5,
+};
+
+const estimateComponentMaterialCost = (vehicleId, componentMaterials, materialCatalog) => {
+  const vehicleMassKg =
+    COMPONENT_ESTIMATE_MASS_KG_BY_UNIT[vehicleId] ?? vehicles[vehicleId]?.massKg ?? 500;
+  const fractions = COMPONENT_MASS_FRACTIONS_BY_UNIT[vehicleId] ?? COMPONENT_MASS_FRACTIONS_BY_UNIT.ugv;
+  let totalCost = 0;
+  let pricedComponents = 0;
+
+  const components = COMPONENT_MATERIAL_ITEMS.map((item) => {
+    const material = componentMaterials[item.id];
+    const metadata = metadataForMaterial(materialCatalog, material);
+    const quantity = vehicleMassKg * (fractions[item.id] ?? 0);
+    const cost = Number(metadata.cost);
+    const multiplier = COMPONENT_COST_MULTIPLIER[item.id] ?? 1;
+    const componentCost = Number.isFinite(cost) ? cost * quantity * multiplier : 0;
+
+    if (Number.isFinite(cost)) {
+      totalCost += componentCost;
+      pricedComponents += 1;
+    }
+
+    return {
+      id: item.id,
+      label: item.label,
+      material,
+      quantity,
+      cost: componentCost,
+      multiplier,
+      unit: metadata.cost_unit === "USD/L" ? "L" : "kg",
+    };
+  });
+
+  return {
+    totalCost: pricedComponents > 0 ? totalCost : Number.NaN,
+    vehicleMassKg,
+    pricedComponents,
+    totalComponents: COMPONENT_MATERIAL_ITEMS.length,
+    components,
+  };
+};
 
 const reasonNumber = (value, digits = 0) => {
   const parsed = Number.parseFloat(value);
@@ -581,30 +1126,37 @@ const parsePhysicsSnapshot = (snapshotJson) => {
   return DEFAULT_HEALTH_SNAPSHOT;
 };
 
+const normalizeDiagnosticBlock = (diagnostics) => {
+  const factors = Array.isArray(diagnostics?.factors)
+    ? diagnostics.factors
+        .map((factor) => ({
+          id: String(factor.id ?? factor.label ?? "factor"),
+          label: String(factor.label ?? factor.id ?? "Environmental factor"),
+          dx_dt: Number.isFinite(Number(factor.dx_dt)) ? Number(factor.dx_dt) : 0,
+        }))
+        .filter((factor) => Math.abs(factor.dx_dt) > 0)
+    : [];
+
+  return {
+    dx_dt: Number.isFinite(Number(diagnostics?.dx_dt)) ? Number(diagnostics.dx_dt) : 0,
+    factors,
+  };
+};
+
 const normalizeDiagnostics = (diagnostics) => ({
   subsystems: Object.fromEntries(
-    Object.keys(DEFAULT_HEALTH_SNAPSHOT.subsystems).map((subsystem) => {
-      const subsystemDiagnostics = diagnostics?.subsystems?.[subsystem] ?? {};
-      const factors = Array.isArray(subsystemDiagnostics.factors)
-        ? subsystemDiagnostics.factors
-            .map((factor) => ({
-              id: String(factor.id ?? factor.label ?? "factor"),
-              label: String(factor.label ?? factor.id ?? "Environmental factor"),
-              dx_dt: Number.isFinite(Number(factor.dx_dt)) ? Number(factor.dx_dt) : 0,
-            }))
-            .filter((factor) => Math.abs(factor.dx_dt) > 0)
-        : [];
-
-      return [
-        subsystem,
-        {
-          dx_dt: Number.isFinite(Number(subsystemDiagnostics.dx_dt))
-            ? Number(subsystemDiagnostics.dx_dt)
-            : 0,
-          factors,
-        },
-      ];
-    }),
+    Object.keys(DEFAULT_HEALTH_SNAPSHOT.subsystems).map((subsystem) => [
+      subsystem,
+      normalizeDiagnosticBlock(diagnostics?.subsystems?.[subsystem]),
+    ]),
+  ),
+  components: Object.fromEntries(
+    REPORT_FAILURE_ITEMS.map((item) => [
+      item.id,
+      normalizeDiagnosticBlock(
+        diagnostics?.components?.[item.id] ?? diagnostics?.subsystems?.[item.subsystem],
+      ),
+    ]),
   ),
 });
 
@@ -618,6 +1170,115 @@ const parsePhysicsDiagnostics = (diagnosticsJson) => {
     console.error("Unable to parse physics engine diagnostics", error);
   }
   return DEFAULT_DIAGNOSTICS;
+};
+
+const OVERALL_HEALTH_WEIGHTS = Object.freeze({
+  engine: 4,
+  battery: 3,
+  hydraulics: 3,
+  chassis: 2,
+  sensors: 1,
+});
+
+const buildCombinedComponentSnapshot = (componentSnapshots, fallbackSnapshot = DEFAULT_HEALTH_SNAPSHOT) => {
+  const components = Object.fromEntries(
+    REPORT_FAILURE_ITEMS.map((item) => {
+      const sourceSnapshot = componentSnapshots?.[item.id];
+      const value = sourceSnapshot?.components?.[item.id] ??
+        sourceSnapshot?.subsystems?.[item.subsystem] ??
+        sourceSnapshot?.vehicle_health ??
+        1;
+      return [item.id, clampHealthUnit(value)];
+    }),
+  );
+  VEHICLE_HEALTH_GROUPS.forEach((group) => {
+    if (!group.children?.length) return;
+
+    const childValues = group.children
+      .map((child) => components[`${group.subsystem}-${toHealthItemId(child)}`])
+      .filter((value) => Number.isFinite(Number(value)));
+
+    if (childValues.length > 0) {
+      components[group.subsystem] = clampHealthUnit(
+        childValues.reduce((sum, value) => sum + value, 0) / childValues.length,
+      );
+    }
+  });
+  const subsystems = Object.fromEntries(
+    VEHICLE_HEALTH_GROUPS.map((group) => [
+      group.subsystem,
+      clampHealthUnit(components[group.subsystem] ?? fallbackSnapshot?.subsystems?.[group.subsystem] ?? 1),
+    ]),
+  );
+  const weightedTotal = Object.entries(OVERALL_HEALTH_WEIGHTS).reduce(
+    (sum, [subsystem, weight]) => sum + (subsystems[subsystem] ?? 1) * weight,
+    0,
+  );
+  const totalWeight = Object.values(OVERALL_HEALTH_WEIGHTS).reduce((sum, weight) => sum + weight, 0);
+
+  return {
+    ...fallbackSnapshot,
+    components,
+    componentSnapshots,
+    subsystems,
+    vehicle_health: clampHealthUnit(weightedTotal / totalWeight),
+  };
+};
+
+const buildCombinedComponentDiagnostics = (componentDiagnostics) => {
+  const components = Object.fromEntries(
+    REPORT_FAILURE_ITEMS.map((item) => {
+      const diagnostics = componentDiagnostics?.[item.id];
+      return [
+        item.id,
+        diagnostics?.components?.[item.id] ??
+          diagnostics?.subsystems?.[item.subsystem] ??
+          DEFAULT_DIAGNOSTICS.subsystems[item.subsystem],
+      ];
+    }),
+  );
+  VEHICLE_HEALTH_GROUPS.forEach((group) => {
+    if (!group.children?.length) return;
+
+    const childDiagnostics = group.children
+      .map((child) => components[`${group.subsystem}-${toHealthItemId(child)}`])
+      .filter(Boolean);
+
+    if (!childDiagnostics.length) return;
+
+    const factorTotals = new Map();
+    childDiagnostics.forEach((diagnostics) => {
+      (diagnostics.factors ?? []).forEach((factor) => {
+        const current = factorTotals.get(factor.id) ?? {
+          id: factor.id,
+          label: factor.label,
+          dx_dt: 0,
+        };
+        current.dx_dt += factor.dx_dt / childDiagnostics.length;
+        factorTotals.set(factor.id, current);
+      });
+    });
+
+    components[group.subsystem] = {
+      dx_dt: childDiagnostics.reduce((sum, diagnostics) => sum + diagnostics.dx_dt, 0) /
+        childDiagnostics.length,
+      factors: Array.from(factorTotals.values()).filter((factor) => Math.abs(factor.dx_dt) > 0),
+    };
+  });
+  const subsystems = Object.fromEntries(
+    VEHICLE_HEALTH_GROUPS.map((group) => [
+      group.subsystem,
+      components[group.subsystem] ?? DEFAULT_DIAGNOSTICS.subsystems[group.subsystem],
+    ]),
+  );
+
+  return { subsystems, components };
+};
+
+const disposeComponentEngines = (engines) => {
+  Object.values(engines ?? {}).forEach((engine) => {
+    engine?.free?.();
+  });
 };
 
 const ensurePhysicsEngineRuntime = () => {
@@ -671,6 +1332,15 @@ const formatCoefficient = (value) => {
   if (!Number.isFinite(numericValue)) return "0";
   if (Math.abs(numericValue) >= 1) return numericValue.toFixed(3);
   return numericValue.toPrecision(3);
+};
+
+const effectiveCoefficientForFactor = (factor, stress, fallbackCoefficient) => {
+  const dxdt = Math.abs(Number(factor?.dx_dt));
+  const stressValue = Math.abs(Number(stress));
+  if (Number.isFinite(dxdt) && Number.isFinite(stressValue) && stressValue > 0) {
+    return dxdt / stressValue;
+  }
+  return fallbackCoefficient;
 };
 
 function DiagnosticFormula({ label, coefficient, children }) {
@@ -733,10 +1403,17 @@ const DIAGNOSTIC_FACTOR_DETAILS = {
       battery: "battery_heat_c",
       hydraulics: "hydraulics_heat_c",
     },
-    describe: ({ snapshot, subsystem, coefficientKey, thresholdKey }) => {
+    describe: ({ factor, snapshot, subsystem, coefficientKey, thresholdKey }) => {
       const environment = environmentSnapshotValues(snapshot);
       const threshold = snapshot?.thresholds?.[thresholdKey];
-      const coefficient = snapshot?.coefficients?.[coefficientKey];
+      const stress = Number.isFinite(environment.temperatureC) && Number.isFinite(Number(threshold))
+        ? Math.max(0, environment.temperatureC - Number(threshold))
+        : 0;
+      const coefficient = effectiveCoefficientForFactor(
+        factor,
+        stress,
+        snapshot?.coefficients?.[coefficientKey],
+      );
       const marginText = Number.isFinite(environment.temperatureC) && Number.isFinite(Number(threshold))
         ? `${formatDiagnosticDecimal(environment.temperatureC - Number(threshold), 3)} C above limit`
         : "above the material limit";
@@ -770,10 +1447,17 @@ const DIAGNOSTIC_FACTOR_DETAILS = {
       battery: "battery_cold_c",
       hydraulics: "hydraulics_cold_c",
     },
-    describe: ({ snapshot, subsystem, coefficientKey, thresholdKey }) => {
+    describe: ({ factor, snapshot, subsystem, coefficientKey, thresholdKey }) => {
       const environment = environmentSnapshotValues(snapshot);
       const threshold = snapshot?.thresholds?.[thresholdKey];
-      const coefficient = snapshot?.coefficients?.[coefficientKey];
+      const stress = Number.isFinite(environment.temperatureC) && Number.isFinite(Number(threshold))
+        ? Math.max(0, Number(threshold) - environment.temperatureC)
+        : 0;
+      const coefficient = effectiveCoefficientForFactor(
+        factor,
+        stress,
+        snapshot?.coefficients?.[coefficientKey],
+      );
       const marginText = Number.isFinite(environment.temperatureC) && Number.isFinite(Number(threshold))
         ? `${formatDiagnosticDecimal(Number(threshold) - environment.temperatureC, 3)} C below limit`
         : "below the material limit";
@@ -801,9 +1485,13 @@ const DIAGNOSTIC_FACTOR_DETAILS = {
       engine: "engine_dust",
       sensors: "sensors_dust",
     },
-    describe: ({ snapshot, subsystem, coefficientKey }) => {
+    describe: ({ factor, snapshot, subsystem, coefficientKey }) => {
       const environment = environmentSnapshotValues(snapshot);
-      const coefficient = snapshot?.coefficients?.[coefficientKey];
+      const coefficient = effectiveCoefficientForFactor(
+        factor,
+        environment.particulateConcentration,
+        snapshot?.coefficients?.[coefficientKey],
+      );
       const dust = Number.isFinite(environment.particulateMgM3)
         ? environment.particulateMgM3.toFixed(2)
         : "unknown";
@@ -833,10 +1521,17 @@ const DIAGNOSTIC_FACTOR_DETAILS = {
       sensors: "sensors_humidity",
       chassis: "chassis_humidity",
     },
-    describe: ({ snapshot, subsystem, coefficientKey, thresholdKey }) => {
+    describe: ({ factor, snapshot, subsystem, coefficientKey, thresholdKey }) => {
       const environment = environmentSnapshotValues(snapshot);
-      const coefficient = snapshot?.coefficients?.[coefficientKey];
       const threshold = Number(snapshot?.thresholds?.[thresholdKey] ?? 0);
+      const stress = Number.isFinite(environment.humidityRatio)
+        ? Math.max(0, environment.humidityRatio - threshold)
+        : 0;
+      const coefficient = effectiveCoefficientForFactor(
+        factor,
+        stress,
+        snapshot?.coefficients?.[coefficientKey],
+      );
       const humidity = Number.isFinite(environment.humidityRatio)
         ? environment.humidityRatio.toFixed(3)
         : "unknown";
@@ -862,9 +1557,16 @@ const DIAGNOSTIC_FACTOR_DETAILS = {
     coefficientBySubsystem: {
       chassis: "chassis_salinity",
     },
-    describe: ({ snapshot, subsystem, coefficientKey }) => {
+    describe: ({ factor, snapshot, subsystem, coefficientKey }) => {
       const environment = environmentSnapshotValues(snapshot);
-      const coefficient = snapshot?.coefficients?.[coefficientKey];
+      const stress = Number.isFinite(environment.salinityFraction)
+        ? environment.salinityFraction ** 2
+        : 0;
+      const coefficient = effectiveCoefficientForFactor(
+        factor,
+        stress,
+        snapshot?.coefficients?.[coefficientKey],
+      );
       const salinity = Number.isFinite(environment.salinityFraction)
         ? environment.salinityFraction.toFixed(4)
         : "unknown";
@@ -888,9 +1590,8 @@ const DIAGNOSTIC_FACTOR_DETAILS = {
       hydraulics: "hydraulics_uv",
       sensors: "sensors_uv",
     },
-    describe: ({ snapshot, subsystem, coefficientKey }) => {
+    describe: ({ factor, snapshot, subsystem, coefficientKey }) => {
       const environment = environmentSnapshotValues(snapshot);
-      const coefficient = snapshot?.coefficients?.[coefficientKey];
       const irradiance = Number.isFinite(environment.irradianceWm2)
         ? Math.round(environment.irradianceWm2)
         : "unknown";
@@ -899,6 +1600,14 @@ const DIAGNOSTIC_FACTOR_DETAILS = {
         : "unknown";
       const formula = subsystem === "battery" ? "irradiance squared" : "irradiance";
       const engineFormula = subsystem === "battery" ? "u^2" : "u";
+      const stress = subsystem === "battery"
+        ? (environment.irradianceNormalized ?? 0) ** 2
+        : environment.irradianceNormalized;
+      const coefficient = effectiveCoefficientForFactor(
+        factor,
+        stress,
+        snapshot?.coefficients?.[coefficientKey],
+      );
       return {
         input: `u ${modelIrradiance} normalized (${irradiance} W/m2)`,
         formula: (
@@ -954,6 +1663,9 @@ const describeDiagnosticFactor = (factor, subsystem, snapshot) => {
 
 const healthValueForItem = (snapshot, item) => {
   if (item.overall) return clampHealthUnit(snapshot?.vehicle_health ?? 1);
+  if (Number.isFinite(Number(snapshot?.components?.[item.id]))) {
+    return clampHealthUnit(snapshot.components[item.id]);
+  }
   return clampHealthUnit(snapshot?.subsystems?.[item.subsystem] ?? snapshot?.vehicle_health ?? 1);
 };
 
@@ -1002,6 +1714,241 @@ const missionStatusLabel = (failureCount) => (
     ? `${failureCount} Critical Components Failed`
     : "Mission Passed"
 );
+
+const cleanReportText = (value) => (
+  String(value ?? "")
+    .replace(/[^\x20-\x7E\n]/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .trim()
+);
+
+const humanizeMaterialName = (value) => (
+  cleanReportText(value)
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+);
+
+const executiveRiskLevel = ({ finalHealth, failedParentCount, failureCount, activeDriverCount }) => {
+  if (failedParentCount > 0 || failureCount >= 4 || finalHealth < 0.45) return "Critical";
+  if (failureCount > 0 || finalHealth < 0.68) return "High";
+  if (activeDriverCount >= 2 || finalHealth < 0.84) return "Moderate";
+  return "Low";
+};
+
+const executiveStatusForRisk = (riskLevel) => {
+  switch (riskLevel) {
+    case "Critical":
+      return "Not Mission Ready";
+    case "High":
+      return "Mission At Risk";
+    case "Moderate":
+      return "Ready With Controls";
+    default:
+      return "Ready";
+  }
+};
+
+const executiveRiskColor = (riskLevel) => {
+  switch (riskLevel) {
+    case "Critical":
+      return "#991b1b";
+    case "High":
+      return "#b45309";
+    case "Moderate":
+      return "#1d4ed8";
+    default:
+      return "#15803d";
+  }
+};
+
+const executiveRecommendation = (riskLevel) => {
+  switch (riskLevel) {
+    case "Critical":
+      return "Do not deploy as planned. Replace failed critical components or change the operating profile before release.";
+    case "High":
+      return "Deploy only with mitigation. Pre-stage spares, reduce exposure time, and inspect the main risk area before launch.";
+    case "Moderate":
+      return "Deploy with controls. Monitor the top subsystem and limit exposure to the active environmental drivers.";
+    default:
+      return "Deploy. Keep normal inspection cadence and preserve the current material and operating assumptions.";
+  }
+};
+
+const buildExecutiveReportModel = (report) => {
+  const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
+  const finalHealth = clampHealthUnit(finalSnapshot.vehicle_health ?? 1);
+  const failures = buildFailureSummary(report.series, report.inputs, report.durationDays);
+  const activeDrivers = ENVIRONMENT_FAILURE_FACTORS
+    .filter((factor) => factor.isActive(report.inputs ?? {}))
+    .map((factor) => ({
+      label: factor.label,
+      description: factor.describe(report.inputs ?? {}),
+    }));
+  const parentItems = VEHICLE_HEALTH_GROUPS.map((group) => ({
+    id: group.subsystem,
+    label: group.label,
+    subsystem: group.subsystem,
+    parent: true,
+    children: group.children ?? [],
+  }));
+  const parentRisks = parentItems
+    .map((item) => {
+      const health = healthValueForItem(finalSnapshot, item);
+      const failedDay = failedDayForItem(report.series, item);
+      const importance = importanceForItem(item);
+      const failure = failures.find((entry) => entry.subsystem === item.subsystem);
+      return {
+        ...item,
+        health,
+        failedDay,
+        importance,
+        reason: failure?.reason ?? failureReasonForItem(item, report.inputs, report.durationDays),
+      };
+    })
+    .sort((a, b) => (
+      Number(b.failedDay !== null) - Number(a.failedDay !== null) ||
+      b.importance.rank - a.importance.rank ||
+      a.health - b.health
+    ));
+  const failedParentCount = parentRisks.filter((item) => item.failedDay !== null).length;
+  const riskLevel = executiveRiskLevel({
+    finalHealth,
+    failedParentCount,
+    failureCount: failures.length,
+    activeDriverCount: activeDrivers.length,
+  });
+  const lowestParent = [...parentRisks].sort((a, b) => a.health - b.health)[0];
+  const topDrivers = activeDrivers.length
+    ? activeDrivers
+    : [{ label: "No threshold driver", description: "Inputs did not cross the modeled high-risk environmental thresholds." }];
+  const driverSummary = topDrivers.slice(0, 2).map((driver) => driver.label.toLowerCase()).join(" and ");
+  const criticalText = failures.length
+    ? `${failures.length} tracked components cross the failure threshold.`
+    : "No tracked component crosses the failure threshold.";
+  const summary = `${criticalText} The limiting area is ${lowestParent?.label ?? "the vehicle"} at ${formatHealthPercent(lowestParent?.health ?? finalHealth)} final health, driven mainly by ${driverSummary}.`;
+  const actions = [
+    failures.length
+      ? `Replace or inspect failed components before deployment; first failure appears on day ${Math.min(...failures.map((failure) => failure.failedDay))}.`
+      : "Keep the planned mission profile; no modeled failure threshold is crossed.",
+    activeDrivers.length
+      ? `Mitigate ${topDrivers.slice(0, 2).map((driver) => driver.label.toLowerCase()).join(" and ")} before launch.`
+      : "Maintain baseline environmental controls; no high-risk driver is active.",
+    `Prioritize ${lowestParent?.label ?? "vehicle"} checks because it ends lowest among the main subsystems.`,
+    "Re-run the simulation if duration, material, or theater conditions change materially.",
+  ];
+
+  return {
+    finalSnapshot,
+    finalHealth,
+    failures,
+    parentRisks,
+    topRisks: parentRisks.slice(0, 3),
+    activeDrivers: topDrivers,
+    riskLevel,
+    status: executiveStatusForRisk(riskLevel),
+    recommendation: executiveRecommendation(riskLevel),
+    summary,
+    actions,
+    materialName: humanizeMaterialName(report.material),
+    durationLabel: `${report.durationDays} days`,
+    unitLabel: report.unitLabel,
+  };
+};
+
+const formatCostUsd = (value) => COST_FORMATTER.format(Math.round(value));
+
+const costItemForBaseline = (baseline) => {
+  if (baseline.parent) {
+    return REPORT_HEALTH_ITEMS.find((item) => item.subsystem === baseline.subsystem && item.parent);
+  }
+  return REPORT_HEALTH_ITEMS.find((item) => (
+    item.subsystem === baseline.subsystem &&
+    item.label === baseline.sourceLabel
+  ));
+};
+
+const roundCost = (value) => Math.round(value / 25) * 25;
+
+const costStatusForRow = (finalHealth, failedDay) => {
+  if (failedDay !== null) return "Replacement";
+  if (finalHealth < 0.7) return "Corrective reserve";
+  if (finalHealth < 0.9) return "Preventive service";
+  return "Monitor";
+};
+
+const buildCostReportModel = (report, executiveModel = buildExecutiveReportModel(report)) => {
+  const vehicleIdForCost = report.vehicleId === "drone" ? "drone" : "ugv";
+  const componentBaselines =
+    COST_COMPONENT_BASELINES_BY_VEHICLE[vehicleIdForCost] ??
+    COST_COMPONENT_BASELINES_BY_VEHICLE.ugv;
+  const finalSnapshot = report.series[report.series.length - 1]?.snapshot;
+  const startSnapshot = report.series[0]?.snapshot;
+  const hasActiveDrivers = executiveModel.activeDrivers.some((driver) => (
+    driver.label !== "No threshold driver"
+  ));
+  const rows = componentBaselines.map((baseline) => {
+    const item = costItemForBaseline(baseline);
+    const finalHealth = item ? healthValueForItem(finalSnapshot, item) : 1;
+    const startHealth = item ? healthValueForItem(startSnapshot, item) : 1;
+    const failedDay = item ? failedDayForItem(report.series, item) : null;
+    const degradation = Math.max(0, startHealth - finalHealth);
+    const status = costStatusForRow(finalHealth, failedDay);
+    let estimatedCost;
+    let reason;
+
+    if (failedDay !== null) {
+      estimatedCost = baseline.replacementCost + baseline.inspectionCost;
+      reason = `Failed on day ${failedDay}; plan replacement plus inspection.`;
+    } else if (finalHealth < 0.7) {
+      estimatedCost = baseline.inspectionCost + baseline.replacementCost * (0.45 + (0.7 - finalHealth) * 0.75);
+      reason = "Low readiness; reserve corrective maintenance budget.";
+    } else if (finalHealth < 0.9) {
+      estimatedCost = baseline.inspectionCost + baseline.replacementCost * (0.12 + (0.9 - finalHealth) * 0.5);
+      reason = "Moderate wear; schedule preventive service.";
+    } else if (degradation > 0.02 || hasActiveDrivers) {
+      estimatedCost = baseline.inspectionCost + baseline.replacementCost * degradation * 0.2;
+      reason = "Environmental exposure warrants inspection and wear reserve.";
+    } else {
+      estimatedCost = baseline.inspectionCost * 0.35;
+      reason = "No failure; monitor at normal interval.";
+    }
+
+    return {
+      ...baseline,
+      item,
+      finalHealth,
+      startHealth,
+      degradation,
+      failedDay,
+      status,
+      estimatedCost: roundCost(estimatedCost),
+      reason,
+    };
+  }).sort((a, b) => (
+    b.estimatedCost - a.estimatedCost ||
+    a.label.localeCompare(b.label)
+  ));
+  const totalEstimatedCost = rows.reduce((sum, row) => sum + row.estimatedCost, 0);
+  const replacementExposure = rows
+    .filter((row) => row.status === "Replacement")
+    .reduce((sum, row) => sum + row.estimatedCost, 0);
+  const preventiveExposure = rows
+    .filter((row) => row.status !== "Replacement")
+    .reduce((sum, row) => sum + row.estimatedCost, 0);
+
+  return {
+    rows,
+    vehicleId: vehicleIdForCost,
+    profileLabel: vehicleIdForCost === "drone" ? "Air Unit cost profile" : "Land Unit cost profile",
+    datasetRowsUsed: componentBaselines.length,
+    totalEstimatedCost,
+    replacementExposure,
+    preventiveExposure,
+    topCostDrivers: rows.slice(0, 4),
+    formattedTotal: formatCostUsd(totalEstimatedCost),
+    sourceNote: `${COST_SOURCE_NOTE} Profile: ${vehicleIdForCost === "drone" ? "Air Unit" : "Land Unit"}; rows used: ${componentBaselines.length}/${COST_DATASET_ROW_COUNT}.`,
+  };
+};
 
 const buildTrendPoints = (series, item, yOffset = 0) => {
   if (!series.length) return "";
@@ -1100,8 +2047,12 @@ const pdfColdStress = (threshold, temperatureC) => (
 );
 
 const buildPdfPhysicsCards = (report, finalSnapshot) => {
-  const c = finalSnapshot?.coefficients ?? {};
-  const t = finalSnapshot?.thresholds ?? {};
+  const coefficientsFor = (id) => (
+    finalSnapshot?.componentSnapshots?.[id]?.coefficients ?? finalSnapshot?.coefficients ?? {}
+  );
+  const thresholdsFor = (id) => (
+    finalSnapshot?.componentSnapshots?.[id]?.thresholds ?? finalSnapshot?.thresholds ?? {}
+  );
   const input = pdfReportInputs(report, finalSnapshot);
   const heatStress = (threshold) => Math.max(0, input.temperatureC - pdfFiniteNumber(threshold));
   const humidityStress = (threshold) => Math.max(0, input.humidity - pdfFiniteNumber(threshold));
@@ -1115,10 +2066,20 @@ const buildPdfPhysicsCards = (report, finalSnapshot) => {
       terms,
       dxdt,
       daily: dxdt * PHYSICS_DEGRADATION_SCALE,
-      health: clampHealthUnit(finalSnapshot?.subsystems?.[id] ?? finalSnapshot?.vehicle_health ?? 1),
+      health: healthValueForItem(finalSnapshot, { id, subsystem: id }),
       why,
     };
   };
+  const engineC = coefficientsFor("engine");
+  const engineT = thresholdsFor("engine");
+  const batteryC = coefficientsFor("battery");
+  const batteryT = thresholdsFor("battery");
+  const hydraulicsC = coefficientsFor("hydraulics");
+  const hydraulicsT = thresholdsFor("hydraulics");
+  const sensorsC = coefficientsFor("sensors");
+  const sensorsT = thresholdsFor("sensors");
+  const chassisC = coefficientsFor("chassis");
+  const chassisT = thresholdsFor("chassis");
 
   return {
     input,
@@ -1129,9 +2090,9 @@ const buildPdfPhysicsCards = (report, finalSnapshot) => {
         "Engine",
         "dx_engine/dt = -k_heat*max(0,T_C-T_heat) - k_cold*max(0,T_cold-T_C) - k_dust*d",
         [
-          pdfTerm("heat", c.engine_heat, heatStress(t.engine_heat_c), researchMechanismForFactor("extreme_heat", "engine")),
-          pdfTerm("cold", c.engine_cold, pdfColdStress(t.engine_cold_c, input.temperatureC), researchMechanismForFactor("extreme_cold", "engine")),
-          pdfTerm("dust", c.engine_dust, input.particulate, researchMechanismForFactor("dust_ingestion", "engine")),
+          pdfTerm("heat", engineC.engine_heat, heatStress(engineT.engine_heat_c), researchMechanismForFactor("extreme_heat", "engine")),
+          pdfTerm("cold", engineC.engine_cold, pdfColdStress(engineT.engine_cold_c, input.temperatureC), researchMechanismForFactor("extreme_cold", "engine")),
+          pdfTerm("dust", engineC.engine_dust, input.particulate, researchMechanismForFactor("dust_ingestion", "engine")),
         ],
         "Engine degrades from thermal margin loss and abrasive intake contamination.",
       ),
@@ -1141,9 +2102,9 @@ const buildPdfPhysicsCards = (report, finalSnapshot) => {
         "Battery",
         "dx_battery/dt = -k_heat*max(0,T_C-T_heat) - k_cold*max(0,T_cold-T_C) - k_uv*u^2",
         [
-          pdfTerm("heat", c.battery_heat, heatStress(t.battery_heat_c), researchMechanismForFactor("extreme_heat", "battery")),
-          pdfTerm("cold", c.battery_cold, pdfColdStress(t.battery_cold_c, input.temperatureC), researchMechanismForFactor("extreme_cold", "battery")),
-          pdfTerm("uv", c.battery_uv, input.irradiance ** 2, researchMechanismForFactor("uv_solar_radiation", "battery")),
+          pdfTerm("heat", batteryC.battery_heat, heatStress(batteryT.battery_heat_c), researchMechanismForFactor("extreme_heat", "battery")),
+          pdfTerm("cold", batteryC.battery_cold, pdfColdStress(batteryT.battery_cold_c, input.temperatureC), researchMechanismForFactor("extreme_cold", "battery")),
+          pdfTerm("uv", batteryC.battery_uv, input.irradiance ** 2, researchMechanismForFactor("uv_solar_radiation", "battery")),
         ],
         "Battery degrades from temperature-driven capacity loss and solar heat loading.",
       ),
@@ -1153,9 +2114,9 @@ const buildPdfPhysicsCards = (report, finalSnapshot) => {
         "Hydraulics",
         "dx_hydraulics/dt = -k_heat*max(0,T_C-T_heat) - k_cold*max(0,T_cold-T_C) - k_uv*u",
         [
-          pdfTerm("heat", c.hydraulics_heat, heatStress(t.hydraulics_heat_c), researchMechanismForFactor("extreme_heat", "hydraulics")),
-          pdfTerm("cold", c.hydraulics_cold, pdfColdStress(t.hydraulics_cold_c, input.temperatureC), researchMechanismForFactor("extreme_cold", "hydraulics")),
-          pdfTerm("uv", c.hydraulics_uv, input.irradiance, researchMechanismForFactor("uv_solar_radiation", "hydraulics")),
+          pdfTerm("heat", hydraulicsC.hydraulics_heat, heatStress(hydraulicsT.hydraulics_heat_c), researchMechanismForFactor("extreme_heat", "hydraulics")),
+          pdfTerm("cold", hydraulicsC.hydraulics_cold, pdfColdStress(hydraulicsT.hydraulics_cold_c, input.temperatureC), researchMechanismForFactor("extreme_cold", "hydraulics")),
+          pdfTerm("uv", hydraulicsC.hydraulics_uv, input.irradiance, researchMechanismForFactor("uv_solar_radiation", "hydraulics")),
         ],
         "Hydraulics degrade from fluid viscosity shifts, seal damage, actuator sluggishness, and UV hose aging.",
       ),
@@ -1165,11 +2126,11 @@ const buildPdfPhysicsCards = (report, finalSnapshot) => {
         "Thermal, Radar, Acoustic, GPS, Camera",
         "dx_sensors/dt = -k_dust*d - k_humidity*max(0,y-y_thr) - k_uv*u",
         [
-          pdfTerm("dust", c.sensors_dust, input.particulate, researchMechanismForFactor("dust_ingestion", "sensors")),
-          pdfTerm("humidity", c.sensors_humidity, humidityStress(t.sensors_humidity), researchMechanismForFactor("humidity", "sensors")),
-          pdfTerm("uv", c.sensors_uv, input.irradiance, researchMechanismForFactor("uv_solar_radiation", "sensors")),
+          pdfTerm("dust", sensorsC.sensors_dust, input.particulate, researchMechanismForFactor("dust_ingestion", "sensors")),
+          pdfTerm("humidity", sensorsC.sensors_humidity, humidityStress(sensorsT.sensors_humidity), researchMechanismForFactor("humidity", "sensors")),
+          pdfTerm("uv", sensorsC.sensors_uv, input.irradiance, researchMechanismForFactor("uv_solar_radiation", "sensors")),
         ],
-        "Sensor subcomponents inherit this sensor equation because the engine tracks one sensor-health state.",
+        "Sensor subcomponents use the sensor equation family plus native component-rate multipliers.",
       ),
       card(
         "chassis",
@@ -1177,10 +2138,10 @@ const buildPdfPhysicsCards = (report, finalSnapshot) => {
         "Frame, Plating, Suspension, Underbelly, Track/wheels, Hatches/doors",
         "dx_chassis/dt = -k_humidity*max(0,y-y_thr) - k_salinity*sigma^2",
         [
-          pdfTerm("humidity", c.chassis_humidity, humidityStress(t.chassis_humidity), researchMechanismForFactor("humidity", "chassis")),
-          pdfTerm("salinity", c.chassis_salinity, input.salinity ** 2, researchMechanismForFactor("salinity", "chassis")),
+          pdfTerm("humidity", chassisC.chassis_humidity, humidityStress(chassisT.chassis_humidity), researchMechanismForFactor("humidity", "chassis")),
+          pdfTerm("salinity", chassisC.chassis_salinity, input.salinity ** 2, researchMechanismForFactor("salinity", "chassis")),
         ],
-        "Chassis subcomponents inherit this chassis equation because the engine tracks one chassis-health state.",
+        "Chassis subcomponents use the chassis equation family plus native component-rate multipliers.",
       ),
     ],
   };
@@ -1495,6 +2456,8 @@ const buildReportPdf = (report) => {
   const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
   const finalHealth = clampHealthUnit(finalSnapshot.vehicle_health ?? 1);
   const failures = buildFailureSummary(report.series, report.inputs, report.durationDays);
+  const executiveModel = buildExecutiveReportModel(report);
+  const costModel = buildCostReportModel(report, executiveModel);
   const physics = buildPdfPhysicsCards(report, finalSnapshot);
   const physicsBySubsystem = Object.fromEntries(physics.cards.map((card) => [card.id, card]));
   const componentItems = REPORT_HEALTH_ITEMS.filter((item) => !item.overall);
@@ -1502,7 +2465,7 @@ const buildReportPdf = (report) => {
   const endDay = report.series[report.series.length - 1]?.day ?? report.durationDays;
   const daySpan = Math.max(1, endDay - startDay);
   const margin = 34;
-  const pageCount = 5;
+  const pageCount = 6;
   const pageStreams = [];
 
   const itemById = Object.fromEntries(REPORT_HEALTH_ITEMS.map((item) => [item.id, item]));
@@ -1517,14 +2480,14 @@ const buildReportPdf = (report) => {
   const powerItems = ["engine", "battery", "hydraulics"].map(parentItem).filter(Boolean);
 
   const componentNotes = {
-    Chassis: "Shared structural health state for frame, plating, suspension, underbody, tracks/wheels, hatches, and doors.",
+    Chassis: "Aggregate structural state averaged from component-specific frame, plating, suspension, underbody, track/wheel, hatch, and door degradation.",
     Frame: "Humidity causes rust at weld points and joints; salinity accelerates metal corrosion.",
     Plating: "Salinity attacks metal plating; humidity drives coating breakdown and corrosion spread.",
     Suspension: "Joints and mounts inherit weld/joint corrosion; moisture and salt reduce mechanical margin.",
     Underbelly: "Underbelly is called out in research as a salinity corrosion target at welds and joints.",
     "Track / wheels": "Running gear inherits chassis corrosion and dust-driven mechanical contamination.",
     "Hatches & doors": "Research calls out hatch seal degradation from humidity and rubber/gasket shrinkage from UV.",
-    Sensors: "Shared sensor health state for thermal, radar, acoustic, GPS, and camera packages.",
+    Sensors: "Aggregate sensor state averaged from component-specific thermal, radar, acoustic, GPS, and camera degradation.",
     Thermal: "Thermal optics inherit condensation, optical coating degradation, dust obscuration, and accuracy drift.",
     Radar: "Radar inherits clogged antenna elements from dust and corrosion on electrical contacts from humidity.",
     Acoustic: "Acoustic sensors inherit connector moisture and corrosion-driven reliability loss.",
@@ -1533,6 +2496,18 @@ const buildReportPdf = (report) => {
     Engine: "Research calls out oil thinning, cooling overload, less dense intake air, filter clogging, and scored cylinder walls.",
     Battery: "Research calls out immediate cold capacity drop, reduced charge acceptance, and permanent heat/solar capacity loss.",
     Hydraulics: "Research calls out fluid thinning in heat, sluggish fluid in cold, actuator failure, seal degradation, and brittle hoses.",
+  };
+  const pdfRgbForRiskLevel = (riskLevel) => {
+    switch (riskLevel) {
+      case "Critical":
+        return "0.60 0.11 0.11";
+      case "High":
+        return "0.71 0.33 0.04";
+      case "Moderate":
+        return "0.12 0.29 0.72";
+      default:
+        return "0.08 0.50 0.24";
+    }
   };
 
   const createPage = (title, subtitle, pageNumber) => {
@@ -1656,7 +2631,7 @@ const buildReportPdf = (report) => {
     const health = healthValueForItem(finalSnapshot, item);
     const healthRgb = pdfRgbForHealth(health);
     const failedDay = failedDayForItem(report.series, item);
-    const modelLabel = item.parent ? "tracked subsystem" : `inherits ${card.label.toLowerCase()} state`;
+    const modelLabel = item.parent ? "tracked subsystem aggregate" : "component-specific engine state";
     page.rect(x, y, width, height, "1.00 1.00 1.00", "0.82 0.88 0.95");
     page.rect(x, y, 4, height, healthRgb);
     page.text(item.label.toUpperCase(), x + 10, yTop - 13, compact ? 6.8 : 8, "0.08 0.13 0.22", "F2");
@@ -1765,7 +2740,7 @@ const buildReportPdf = (report) => {
   });
   addPage(page3);
 
-  const page4 = createPage("Chassis Breakdown", "Every chassis critical component uses the chassis physics state", 4);
+  const page4 = createPage("Chassis Breakdown", "Chassis components use native component-rate degradation", 4);
   drawEquationPanel(page4, physicsBySubsystem.chassis, margin, 672, PDF_PAGE_WIDTH - margin * 2, 128);
   const gridWidth = (PDF_PAGE_WIDTH - margin * 2 - 14) / 2;
   chassisItems.forEach((item, index) => {
@@ -1775,7 +2750,7 @@ const buildReportPdf = (report) => {
   });
   addPage(page4);
 
-  const page5 = createPage("Sensor Breakdown", "Every sensor critical component uses the sensor physics state", 5);
+  const page5 = createPage("Sensor Breakdown", "Sensor components use native component-rate degradation", 5);
   drawEquationPanel(page5, physicsBySubsystem.sensors, margin, 672, PDF_PAGE_WIDTH - margin * 2, 128);
   sensorItems.forEach((item, index) => {
     const col = index % 2;
@@ -1783,9 +2758,49 @@ const buildReportPdf = (report) => {
     drawComponentCard(page5, item, physicsBySubsystem.sensors, margin + col * (gridWidth + 14), 522 - row * 98, gridWidth, 86, componentNotes[item.label], true);
   });
   page5.rect(margin, 90, PDF_PAGE_WIDTH - margin * 2, 78, "1.00 1.00 1.00", "0.82 0.88 0.95");
-  page5.text("MODEL LIMITATION", margin + 12, 150, 7.4, "0.20 0.39 0.72", "F2");
-  page5.wrappedText("The Rust engine tracks five health states: engine, battery, hydraulics, sensors, and chassis. Chassis and sensor subcomponents are reported separately for operators, but each subcomponent currently inherits its parent subsystem health and equation.", margin + 12, 134, 96, 6.4, "0.08 0.13 0.22", 8, 4);
+  page5.text("COMPONENT RATE SOURCE", margin + 12, 150, 7.4, "0.20 0.39 0.72", "F2");
+  page5.wrappedText("The Rust engine emits component health and diagnostics for chassis and sensor subcomponents. Parent Chassis and Sensors rows are averaged from their child components.", margin + 12, 134, 96, 6.4, "0.08 0.13 0.22", 8, 4);
   addPage(page5);
+
+  const page6 = createPage("Cost Exposure Estimate", costModel.profileLabel, 6);
+  const costTileWidth = (PDF_PAGE_WIDTH - margin * 2 - 24) / 4;
+  drawMetric(page6, margin, 644, costTileWidth, 46, "Estimated Total", costModel.formattedTotal, pdfRgbForRiskLevel(executiveModel.riskLevel));
+  drawMetric(page6, margin + (costTileWidth + 8), 644, costTileWidth, 46, "Replacement", formatCostUsd(costModel.replacementExposure), "0.60 0.11 0.11");
+  drawMetric(page6, margin + (costTileWidth + 8) * 2, 644, costTileWidth, 46, "Preventive", formatCostUsd(costModel.preventiveExposure), "0.08 0.50 0.24");
+  drawMetric(page6, margin + (costTileWidth + 8) * 3, 644, costTileWidth, 46, "Dataset Rows", String(costModel.datasetRowsUsed), "0.20 0.39 0.72");
+
+  page6.text("EXECUTIVE DECISION", margin, 614, 9, "0.20 0.39 0.72", "F2");
+  page6.rect(margin, 488, PDF_PAGE_WIDTH - margin * 2, 110, "1.00 1.00 1.00", "0.82 0.88 0.95");
+  page6.rect(margin, 488, 4, 110, pdfRgbForRiskLevel(executiveModel.riskLevel));
+  page6.text(`${executiveModel.riskLevel} Risk - ${executiveModel.status}`, margin + 12, 576, 12, pdfRgbForRiskLevel(executiveModel.riskLevel), "F2");
+  let decisionCursor = page6.wrappedText(executiveModel.summary, margin + 12, 558, 92, 6.6, "0.08 0.13 0.22", 8, 3);
+  decisionCursor = page6.wrappedText(executiveModel.recommendation, margin + 12, decisionCursor - 4, 92, 6.2, "0.34 0.42 0.52", 7.5, 2);
+  executiveModel.actions.slice(0, 3).forEach((action, index) => {
+    page6.wrappedText(`${index + 1}. ${action}`, margin + 12, decisionCursor - 7 - index * 13, 86, 5.5, "0.42 0.50 0.62", 6.5, 2);
+  });
+
+  page6.text("COST DRIVERS", margin, 458, 9, "0.20 0.39 0.72", "F2");
+  page6.rect(margin, 118, PDF_PAGE_WIDTH - margin * 2, 324, "1.00 1.00 1.00", "0.82 0.88 0.95");
+  page6.text("Component", margin + 12, 424, 6.2, "0.45 0.54 0.66", "F2");
+  page6.text("Status", margin + 192, 424, 6.2, "0.45 0.54 0.66", "F2");
+  page6.text("Final", margin + 296, 424, 6.2, "0.45 0.54 0.66", "F2");
+  page6.text("Cost", margin + 348, 424, 6.2, "0.45 0.54 0.66", "F2");
+  page6.text("Why", margin + 418, 424, 6.2, "0.45 0.54 0.66", "F2");
+  page6.line(margin + 12, 416, PDF_PAGE_WIDTH - margin - 12, 416, "0.82 0.88 0.95", 0.6);
+  costModel.rows.slice(0, 13).forEach((row, index) => {
+    const y = 396 - index * 21;
+    const fill = index % 2 === 0 ? "0.98 0.99 1.00" : "1.00 1.00 1.00";
+    const healthRgb = pdfRgbForHealth(row.finalHealth);
+    page6.rect(margin + 10, y - 7, PDF_PAGE_WIDTH - margin * 2 - 20, 18, fill, "0.90 0.93 0.97", 0.35);
+    page6.rect(margin + 10, y - 7, 3, 18, healthRgb);
+    page6.text(truncatePdfText(row.label, 27), margin + 18, y + 1, 6.2, "0.08 0.13 0.22", "F2");
+    page6.text(truncatePdfText(row.status, 20), margin + 192, y + 1, 5.9, row.status === "Replacement" ? "0.70 0.18 0.18" : "0.30 0.38 0.48");
+    page6.text(formatHealthPercent(row.finalHealth), margin + 296, y + 1, 5.9, healthRgb, "F2");
+    page6.text(formatCostUsd(row.estimatedCost), margin + 348, y + 1, 5.9, "0.08 0.13 0.22", "F2");
+    page6.text(truncatePdfText(row.reason, 46), margin + 418, y + 1, 5.1, "0.42 0.50 0.62");
+  });
+  page6.wrappedText(costModel.sourceNote, margin, 92, 108, 5.8, "0.48 0.56 0.68", 7, 2);
+  addPage(page6);
 
   return buildPdfObjects();
 };
@@ -1844,6 +2859,247 @@ function ComponentTrendCard({ item, series }) {
   );
 }
 
+function MaterialSelect({
+  value,
+  options,
+  onChange,
+  materialCatalog,
+  ariaLabel,
+  tone = "green",
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState(null);
+  const buttonRef = useRef(null);
+  const menuRef = useRef(null);
+  const selectedMaterial = options.includes(value) ? value : options[0];
+  const selectedMetadata = metadataForMaterial(materialCatalog, selectedMaterial);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const updateMenuPosition = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      const viewportPadding = 12;
+      const preferredWidth = Math.max(rect.width, 330);
+      const width = Math.min(preferredWidth, window.innerWidth - viewportPadding * 2);
+      const left = Math.min(
+        Math.max(viewportPadding, rect.left),
+        window.innerWidth - width - viewportPadding,
+      );
+      const bottomSpace = window.innerHeight - rect.bottom - viewportPadding;
+      const topSpace = rect.top - viewportPadding;
+      const openAbove = bottomSpace < 260 && topSpace > bottomSpace;
+      const maxHeight = Math.min(
+        380,
+        Math.max(190, (openAbove ? topSpace : bottomSpace) - 8),
+      );
+
+      setMenuPosition({
+        left,
+        top: openAbove ? rect.top - maxHeight - 8 : rect.bottom + 8,
+        width,
+        maxHeight,
+      });
+    };
+
+    updateMenuPosition();
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (
+        buttonRef.current?.contains(event.target) ||
+        menuRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+      setIsOpen(false);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") setIsOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const selectMaterial = (material) => {
+    onChange(material);
+    setIsOpen(false);
+  };
+
+  return (
+    <div className="material-select" data-tone={tone}>
+      <button
+        type="button"
+        className="material-select__button"
+        ref={buttonRef}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        <span className="material-select__label">{selectedMetadata.label}</span>
+        <span className="material-select__metrics" aria-hidden="true">
+          <span>STR {formatMaterialStrength(selectedMetadata)}</span>
+          <span>{formatMaterialCost(selectedMetadata)}</span>
+        </span>
+      </button>
+
+      {isOpen && menuPosition && createPortal(
+        <div
+          className="material-select-menu"
+          data-tone={tone}
+          ref={menuRef}
+          style={{
+            "--material-menu-left": `${menuPosition.left}px`,
+            "--material-menu-top": `${menuPosition.top}px`,
+            "--material-menu-width": `${menuPosition.width}px`,
+            "--material-menu-max-height": `${menuPosition.maxHeight}px`,
+          }}
+        >
+          <div className="material-select-menu__head" aria-hidden="true">
+            <span>Material</span>
+            <span>Strength</span>
+            <span>Cost</span>
+          </div>
+          <div className="material-select-menu__options" role="listbox" aria-label={ariaLabel}>
+            {options.map((material) => {
+              const metadata = metadataForMaterial(materialCatalog, material);
+              return (
+                <button
+                  type="button"
+                  className="material-select-menu__option"
+                  key={material}
+                  role="option"
+                  aria-selected={material === selectedMaterial}
+                  data-selected={material === selectedMaterial}
+                  onClick={() => selectMaterial(material)}
+                >
+                  <span className="material-select-menu__name">
+                    <strong>{metadata.label}</strong>
+                    <small>{metadata.grade}</small>
+                  </span>
+                  <span className="material-select-menu__metric">
+                    {formatMaterialStrength(metadata)}
+                  </span>
+                  <span className="material-select-menu__metric">
+                    {formatMaterialCost(metadata)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+function ComponentMaterialPanel({
+  baseMaterial,
+  componentMaterials,
+  materialCatalog,
+  costEstimate,
+  onChange,
+  onApplyBase,
+  onApplyPreset,
+}) {
+  const activePresetId = COMPONENT_MATERIAL_PRESETS.find((preset) => {
+    const presetMaterials = buildComponentMaterialPreset(preset.id, materialCatalog);
+    return COMPONENT_MATERIAL_ITEMS.every((item) => (
+      componentMaterials[item.id] === presetMaterials[item.id]
+    ));
+  })?.id;
+
+  return (
+    <aside className="component-material-panel" aria-label="Component materials">
+      <div className="component-material-panel__head">
+        <div>
+          <div className="component-material-panel__title">Component Materials</div>
+        </div>
+        <button
+          type="button"
+          className="component-material-panel__sync"
+          onClick={onApplyBase}
+        >
+          Apply Base
+        </button>
+      </div>
+
+      <div className="component-material-panel__summary">
+        <div className="component-material-total">
+          <span>Total Current Cost</span>
+          <strong>{formatTotalMaterialCost(costEstimate.totalCost)}</strong>
+        </div>
+        <div className="component-material-total component-material-total--muted">
+          <span>Estimated Weight</span>
+          <strong>{formatEstimatedWeightKg(costEstimate.vehicleMassKg)}</strong>
+        </div>
+      </div>
+
+      <div className="component-material-presets" aria-label="Material presets">
+        {COMPONENT_MATERIAL_PRESETS.map((preset) => (
+          <button
+            type="button"
+            className="component-material-preset"
+            key={preset.id}
+            data-active={activePresetId === preset.id}
+            aria-pressed={activePresetId === preset.id}
+            onClick={() => onApplyPreset(preset.id)}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="component-material-panel__body">
+        {COMPONENT_MATERIAL_SECTIONS.map((section) => (
+          <section className="component-material-section" key={section.id}>
+            <div className="component-material-section__title">{section.label}</div>
+            <div className="component-material-section__rows">
+              {section.items.map((item) => (
+                <div className="component-material-row" key={item.id}>
+                  <span className="component-material-row__copy">
+                    <strong>{item.label}</strong>
+                  </span>
+                  <MaterialSelect
+                    value={normalizeComponentMaterial(
+                      item.id,
+                      componentMaterials[item.id],
+                      baseMaterial,
+                    )}
+                    options={materialOptionsForComponent(item.id)}
+                    materialCatalog={materialCatalog}
+                    onChange={(material) => onChange(item.id, material)}
+                    ariaLabel={`Material for ${item.label}`}
+                    tone="green"
+                  />
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </aside>
+  );
+}
+
 function FailureSummarySection({ failures }) {
   return (
     <section className="report-failure-summary" aria-label="Mission summary">
@@ -1879,6 +3135,68 @@ function FailureSummarySection({ failures }) {
       ) : (
         <p>No failures</p>
       )}
+    </section>
+  );
+}
+
+function ExecutiveSummarySection({ model }) {
+  return (
+    <section
+      className="report-exec-summary"
+      style={{ "--exec-risk-color": executiveRiskColor(model.riskLevel) }}
+      aria-label="Executive summary"
+    >
+      <div className="report-exec-summary__head">
+        <span>Executive Summary</span>
+        <strong>{model.riskLevel} Risk</strong>
+      </div>
+      <div className="report-exec-summary__body">
+        <div className="report-exec-summary__decision">
+          <span>{model.status}</span>
+          <p>{model.recommendation}</p>
+        </div>
+        <p className="report-exec-summary__readout">{model.summary}</p>
+        <div className="report-exec-summary__actions">
+          {model.actions.map((action, index) => (
+            <div className="report-exec-summary__action" key={`${index}-${action}`}>
+              <span>{index + 1}</span>
+              <p>{action}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CostSummarySection({ model }) {
+  return (
+    <section className="report-cost-summary" aria-label="Cost estimate">
+      <div className="report-cost-summary__head">
+        <span>Cost Estimate</span>
+        <strong>{model.formattedTotal}</strong>
+      </div>
+      <div className="report-cost-summary__source">
+        {model.profileLabel} - {model.datasetRowsUsed} dataset rows
+      </div>
+      <div className="report-cost-summary__grid">
+        <div className="report-cost-summary__metric">
+          <span>Replacement Exposure</span>
+          <strong>{formatCostUsd(model.replacementExposure)}</strong>
+        </div>
+        <div className="report-cost-summary__metric">
+          <span>Preventive Exposure</span>
+          <strong>{formatCostUsd(model.preventiveExposure)}</strong>
+        </div>
+        <div className="report-cost-summary__drivers">
+          {model.topCostDrivers.map((driver) => (
+            <div className="report-cost-summary__driver" key={driver.label}>
+              <span>{driver.label}</span>
+              <strong>{formatCostUsd(driver.estimatedCost)}</strong>
+            </div>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
@@ -1920,6 +3238,8 @@ function SimulationReportPanel({ report, onClose }) {
   const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
   const finalHealth = clampHealthUnit(finalSnapshot.vehicle_health ?? 1);
   const failures = buildFailureSummary(report.series, report.inputs, report.durationDays);
+  const executiveModel = buildExecutiveReportModel(report);
+  const costModel = buildCostReportModel(report, executiveModel);
   const reportStatusTitle = missionStatusLabel(failures.length);
 
   return (
@@ -1942,7 +3262,7 @@ function SimulationReportPanel({ report, onClose }) {
           <button
             type="button"
             className="report-panel__download"
-            onClick={() => downloadReportPdf(report)}
+            onClick={() => void downloadReportPdf(report)}
             aria-label="Download simulation report PDF"
             title="Download PDF"
           >
@@ -1971,6 +3291,8 @@ function SimulationReportPanel({ report, onClose }) {
       </div>
 
       <div className="report-panel__sections">
+        <ExecutiveSummarySection model={executiveModel} />
+        <CostSummarySection model={costModel} />
         <FailureSummarySection failures={failures} />
         <ComponentTrendCard item={REPORT_HEALTH_ITEMS[0]} series={report.series} />
         {REPORT_HEALTH_SECTIONS.map((section) => (
@@ -2029,12 +3351,25 @@ function VehicleHealthPanel({ snapshot, diagnostics }) {
   const [activeDiagnostics, setActiveDiagnostics] = useState(null);
   const subsystems = snapshot?.subsystems ?? DEFAULT_HEALTH_SNAPSHOT.subsystems;
   const getSubsystemHealth = (subsystem) => (
-    clampHealthUnit(subsystems[subsystem] ?? snapshot?.vehicle_health ?? 1)
+    clampHealthUnit(snapshot?.components?.[subsystem] ?? subsystems[subsystem] ?? snapshot?.vehicle_health ?? 1)
+  );
+  const getComponentHealth = (componentId, subsystem) => (
+    clampHealthUnit(snapshot?.components?.[componentId] ?? subsystems[subsystem] ?? snapshot?.vehicle_health ?? 1)
   );
   const getSubsystemDiagnostics = (subsystem) => (
-    diagnostics?.subsystems?.[subsystem] ?? DEFAULT_DIAGNOSTICS.subsystems[subsystem]
+    diagnostics?.components?.[subsystem] ??
+      diagnostics?.subsystems?.[subsystem] ??
+      DEFAULT_DIAGNOSTICS.subsystems[subsystem]
   );
-  const showDiagnostics = (event, label, subsystem, subsystemDiagnostics) => {
+  const getComponentDiagnostics = (componentId, subsystem) => (
+    diagnostics?.components?.[componentId] ??
+      diagnostics?.subsystems?.[subsystem] ??
+      DEFAULT_DIAGNOSTICS.subsystems[subsystem]
+  );
+  const getComponentSnapshot = (componentId) => (
+    snapshot?.componentSnapshots?.[componentId] ?? snapshot
+  );
+  const showDiagnostics = (event, label, subsystem, subsystemDiagnostics, diagnosticsSnapshot) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const panelRect =
       event.currentTarget.closest(".health-panel")?.getBoundingClientRect() ?? rect;
@@ -2057,6 +3392,7 @@ function VehicleHealthPanel({ snapshot, diagnostics }) {
       label,
       subsystem,
       diagnostics: subsystemDiagnostics,
+      snapshot: diagnosticsSnapshot,
       width: popupWidth,
       top,
       left,
@@ -2074,10 +3410,10 @@ function VehicleHealthPanel({ snapshot, diagnostics }) {
         key={label}
         style={healthColorStyle(health)}
         tabIndex={0}
-        onMouseEnter={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics)}
-        onMouseMove={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics)}
+        onMouseEnter={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics, getComponentSnapshot(subsystem))}
+        onMouseMove={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics, getComponentSnapshot(subsystem))}
         onMouseLeave={hideDiagnostics}
-        onFocus={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics)}
+        onFocus={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics, getComponentSnapshot(subsystem))}
         onBlur={hideDiagnostics}
       >
         <div className="health-row__top">
@@ -2090,10 +3426,11 @@ function VehicleHealthPanel({ snapshot, diagnostics }) {
       </div>
     );
   };
-  const renderHealthChild = (label, subsystem) => {
-    const health = getSubsystemHealth(subsystem);
+  const renderHealthChild = (label, subsystem, componentId) => {
+    const health = getComponentHealth(componentId, subsystem);
     const healthPercent = health * 100;
-    const subsystemDiagnostics = getSubsystemDiagnostics(subsystem);
+    const subsystemDiagnostics = getComponentDiagnostics(componentId, subsystem);
+    const diagnosticsSnapshot = getComponentSnapshot(componentId);
 
     return (
       <div
@@ -2101,10 +3438,10 @@ function VehicleHealthPanel({ snapshot, diagnostics }) {
         key={label}
         style={healthColorStyle(health)}
         tabIndex={0}
-        onMouseEnter={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics)}
-        onMouseMove={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics)}
+        onMouseEnter={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics, diagnosticsSnapshot)}
+        onMouseMove={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics, diagnosticsSnapshot)}
         onMouseLeave={hideDiagnostics}
-        onFocus={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics)}
+        onFocus={(event) => showDiagnostics(event, label, subsystem, subsystemDiagnostics, diagnosticsSnapshot)}
         onBlur={hideDiagnostics}
       >
         <span className="health-child-row__label">{label}</span>
@@ -2138,7 +3475,11 @@ function VehicleHealthPanel({ snapshot, diagnostics }) {
               {group.children && (
                 <div className="health-group__children">
                   {group.children.map((system) =>
-                    renderHealthChild(system, group.subsystem),
+                    renderHealthChild(
+                      system,
+                      group.subsystem,
+                      `${group.subsystem}-${toHealthItemId(system)}`,
+                    ),
                   )}
                 </div>
               )}
@@ -2160,7 +3501,7 @@ function VehicleHealthPanel({ snapshot, diagnostics }) {
           </div>
           <DiagnosticsHoverCard
             diagnostics={activeDiagnostics.diagnostics}
-            snapshot={snapshot}
+            snapshot={activeDiagnostics.snapshot ?? snapshot}
             subsystem={activeDiagnostics.subsystem}
           />
         </div>,
@@ -2274,6 +3615,8 @@ export function TheaterWorkbench() {
     startOfCalendarDay(new Date())
   ));
   const physicsEngineRef = useRef(null);
+  const componentPhysicsEnginesRef = useRef(null);
+  const simulationSetupTokenRef = useRef(0);
   const simulationInputsRef = useRef(null);
   const isSimulationPausedRef = useRef(false);
   const reportHistoryRef = useRef([]);
@@ -2282,8 +3625,12 @@ export function TheaterWorkbench() {
   const [environmentParams, setEnvironmentParams] = useState(() =>
     buildEnvironmentDefaults(theaterIdForSim),
   );
+  const [materialCatalog, setMaterialCatalog] = useState(() => buildFallbackMaterialCatalog());
 
   useEffect(() => {
+    simulationSetupTokenRef.current += 1;
+    disposeComponentEngines(componentPhysicsEnginesRef.current);
+    componentPhysicsEnginesRef.current = null;
     setEnvironmentParams(buildEnvironmentDefaults(theaterIdForSim));
     setIsSimulationActive(false);
     setIsSimulationPaused(false);
@@ -2309,6 +3656,7 @@ export function TheaterWorkbench() {
         if (disposed) return;
         const engine = physicsEngineRef.current ?? new PhysicsEngine();
         physicsEngineRef.current = engine;
+        setMaterialCatalog(normalizeMaterialCatalog(engine.get_materials?.()));
         setVehicleHealthSnapshot(parsePhysicsSnapshot(engine.get_vehicle()));
         setVehicleDiagnostics(parsePhysicsDiagnostics(engine.get_diagnostics?.()));
       })
@@ -2318,6 +3666,9 @@ export function TheaterWorkbench() {
 
     return () => {
       disposed = true;
+      simulationSetupTokenRef.current += 1;
+      disposeComponentEngines(componentPhysicsEnginesRef.current);
+      componentPhysicsEnginesRef.current = null;
       physicsEngineRef.current?.free?.();
       physicsEngineRef.current = null;
     };
@@ -2345,6 +3696,15 @@ export function TheaterWorkbench() {
     simulationDayStepDaysPerSecond,
   );
   const simulationRunDurationLabel = formatEstimatedRunDuration(simulationRunDurationMs);
+  const componentMaterialSelections = normalizeComponentMaterials(
+    environmentParams.componentMaterials,
+    environmentParams.material,
+  );
+  const materialCostEstimate = estimateComponentMaterialCost(
+    vehicleId,
+    componentMaterialSelections,
+    materialCatalog,
+  );
 
   useEffect(() => {
     if (!isSimulationActive) return undefined;
@@ -2397,20 +3757,27 @@ export function TheaterWorkbench() {
 
       setCurrentDay(simulatedDay);
 
-      const physicsEngine = physicsEngineRef.current;
-      if (physicsEngine && targetPhysicsDay > lastPhysicsDay) {
+      const componentEngines = componentPhysicsEnginesRef.current;
+      if (componentEngines && targetPhysicsDay > lastPhysicsDay) {
         try {
           while (lastPhysicsDay < targetPhysicsDay) {
             const nextPhysicsDay = lastPhysicsDay + 1;
-            physicsEngine.set_time_step(PHYSICS_DEGRADATION_SCALE);
-            latestSnapshotForRun = parsePhysicsSnapshot(
-              physicsEngine.tick(
-                physicsEnvironment.temperatureC,
-                physicsEnvironment.particulateConcentration,
-                physicsEnvironment.relativeHumidity,
-                physicsEnvironment.salinityConcentration,
-                physicsEnvironment.irradiance,
-              ),
+            const componentSnapshots = {};
+            Object.entries(componentEngines).forEach(([componentId, componentEngine]) => {
+              componentEngine.set_time_step(PHYSICS_DEGRADATION_SCALE);
+              componentSnapshots[componentId] = parsePhysicsSnapshot(
+                componentEngine.tick(
+                  physicsEnvironment.temperatureC,
+                  physicsEnvironment.particulateConcentration,
+                  physicsEnvironment.relativeHumidity,
+                  physicsEnvironment.salinityConcentration,
+                  physicsEnvironment.irradiance,
+                ),
+              );
+            });
+            latestSnapshotForRun = buildCombinedComponentSnapshot(
+              componentSnapshots,
+              latestSnapshotForRun,
             );
             lastPhysicsDay = nextPhysicsDay;
             didUpdatePhysics = true;
@@ -2427,7 +3794,13 @@ export function TheaterWorkbench() {
 
       if (didUpdatePhysics) {
         setVehicleHealthSnapshot(latestSnapshotForRun);
-        setVehicleDiagnostics(parsePhysicsDiagnostics(physicsEngine.get_diagnostics?.()));
+        const componentDiagnostics = Object.fromEntries(
+          Object.entries(componentEngines).map(([componentId, componentEngine]) => [
+            componentId,
+            parsePhysicsDiagnostics(componentEngine.get_diagnostics?.()),
+          ]),
+        );
+        setVehicleDiagnostics(buildCombinedComponentDiagnostics(componentDiagnostics));
       }
 
       if (progress >= 1) {
@@ -2440,9 +3813,11 @@ export function TheaterWorkbench() {
 
         setSimulationReport({
           theaterLabel: theater.label,
+          vehicleId,
           unitLabel,
           durationDays: simulationDurationDays,
-          material: runInputs.material,
+          material: materialSummaryLabel(runInputs),
+          componentMaterials: runInputs.componentMaterials,
           inputs: runInputs,
           series: finalSeries,
         });
@@ -2461,6 +3836,27 @@ export function TheaterWorkbench() {
 
   const setEnvironmentField = (fieldId, value) => {
     setEnvironmentParams((current) => ({ ...current, [fieldId]: value }));
+  };
+  const setComponentMaterial = (componentId, material) => {
+    setEnvironmentParams((current) => ({
+      ...current,
+      componentMaterials: {
+        ...normalizeComponentMaterials(current.componentMaterials, current.material),
+        [componentId]: normalizeComponentMaterial(componentId, material, current.material),
+      },
+    }));
+  };
+  const applyBaseMaterialToComponents = () => {
+    setEnvironmentParams((current) => ({
+      ...current,
+      componentMaterials: buildDefaultComponentMaterials(current.material),
+    }));
+  };
+  const applyComponentMaterialPreset = (presetId) => {
+    setEnvironmentParams((current) => ({
+      ...current,
+      componentMaterials: buildComponentMaterialPreset(presetId, materialCatalog),
+    }));
   };
   const resetEnvironment = () => {
     setEnvironmentParams(buildEnvironmentDefaults(theaterIdForSim));
@@ -2509,7 +3905,7 @@ export function TheaterWorkbench() {
       return { ...current, dayStepDaysPerSecond: formatDayStepDaysPerSecond(parsed) };
     });
   };
-  const runSimulation = async () => {
+  const runSimulation = () => {
     const durationDays = parseDurationDays(environmentParams.durationDays);
     const dayStepDaysPerSecond = parseDayStepDaysPerSecond(
       environmentParams.dayStepDaysPerSecond,
@@ -2518,10 +3914,18 @@ export function TheaterWorkbench() {
       ...environmentParams,
       durationDays: String(durationDays),
       dayStepDaysPerSecond: formatDayStepDaysPerSecond(dayStepDaysPerSecond),
+      componentMaterials: normalizeComponentMaterials(
+        environmentParams.componentMaterials,
+        environmentParams.material,
+      ),
     };
     simulationInputsRef.current = normalizedParams;
     reportHistoryRef.current = [{ day: 0, snapshot: DEFAULT_HEALTH_SNAPSHOT }];
     lastReportSampleDayRef.current = 0;
+    const setupToken = simulationSetupTokenRef.current + 1;
+    simulationSetupTokenRef.current = setupToken;
+    disposeComponentEngines(componentPhysicsEnginesRef.current);
+    componentPhysicsEnginesRef.current = null;
 
     setEnvironmentParams(normalizedParams);
     setCurrentDay(0);
@@ -2531,26 +3935,59 @@ export function TheaterWorkbench() {
     setIsSimulationPaused(false);
     isSimulationPausedRef.current = false;
     setSimulationStartDate(startOfCalendarDay(new Date()));
-
-    try {
-      await ensurePhysicsEngineRuntime();
-      const physicsEngine = physicsEngineRef.current ?? new PhysicsEngine();
-      physicsEngineRef.current = physicsEngine;
-      const materialKey =
-        MATERIAL_ENGINE_KEYS[normalizedParams.material] ?? normalizedParams.material;
-      if (!physicsEngine.set_material(materialKey)) {
-        physicsEngine.reset();
-      }
-      const initialSnapshot = parsePhysicsSnapshot(physicsEngine.get_vehicle());
-      reportHistoryRef.current = [{ day: 0, snapshot: initialSnapshot }];
-      setVehicleHealthSnapshot(initialSnapshot);
-      setVehicleDiagnostics(parsePhysicsDiagnostics(physicsEngine.get_diagnostics?.()));
-    } catch (error) {
-      console.error("Unable to start physics engine run", error);
-    }
-
     setIsSimulationActive(true);
     setRunToken((token) => token + 1);
+
+    const startPhysicsSetup = () => {
+      if (simulationSetupTokenRef.current !== setupToken) return;
+
+      ensurePhysicsEngineRuntime()
+        .then(() => {
+          if (simulationSetupTokenRef.current !== setupToken) return;
+
+          const physicsEngine = physicsEngineRef.current ?? new PhysicsEngine();
+          physicsEngineRef.current = physicsEngine;
+          const materialKey = materialEngineKey(normalizedParams.material);
+          if (!physicsEngine.set_material(materialKey)) {
+            physicsEngine.reset();
+          }
+          const componentEngines = {};
+          const componentSnapshots = {};
+          const componentDiagnostics = {};
+          COMPONENT_MATERIAL_ITEMS.forEach((item) => {
+            const componentEngine = new PhysicsEngine();
+            const selectedMaterial = normalizedParams.componentMaterials[item.id] ?? normalizedParams.material;
+            const selectedMaterialKey = materialEngineKey(selectedMaterial);
+            if (!componentEngine.set_material(selectedMaterialKey)) {
+              componentEngine.set_material(materialKey);
+            }
+            componentEngines[item.id] = componentEngine;
+            componentSnapshots[item.id] = parsePhysicsSnapshot(componentEngine.get_vehicle());
+            componentDiagnostics[item.id] = parsePhysicsDiagnostics(componentEngine.get_diagnostics?.());
+          });
+          if (simulationSetupTokenRef.current !== setupToken) {
+            disposeComponentEngines(componentEngines);
+            return;
+          }
+
+          componentPhysicsEnginesRef.current = componentEngines;
+          const initialSnapshot = buildCombinedComponentSnapshot(
+            componentSnapshots,
+            parsePhysicsSnapshot(physicsEngine.get_vehicle()),
+          );
+          const initialDiagnostics = buildCombinedComponentDiagnostics(componentDiagnostics);
+          reportHistoryRef.current = [{ day: 0, snapshot: initialSnapshot }];
+          setVehicleHealthSnapshot(initialSnapshot);
+          setVehicleDiagnostics(initialDiagnostics);
+        })
+        .catch((error) => {
+          console.error("Unable to start physics engine run", error);
+        });
+    };
+
+    requestAnimationFrame(() => {
+      window.setTimeout(startPhysicsSetup, 0);
+    });
   };
   const toggleSimulationPause = () => {
     setIsSimulationPaused((current) => {
@@ -2560,6 +3997,9 @@ export function TheaterWorkbench() {
     });
   };
   const stopSimulation = () => {
+    simulationSetupTokenRef.current += 1;
+    disposeComponentEngines(componentPhysicsEnginesRef.current);
+    componentPhysicsEnginesRef.current = null;
     setIsSimulationActive(false);
     setIsSimulationPaused(false);
     isSimulationPausedRef.current = false;
@@ -2572,6 +4012,9 @@ export function TheaterWorkbench() {
     lastReportSampleDayRef.current = 0;
   };
   const selectVehicleUnit = (nextVehicleId) => {
+    simulationSetupTokenRef.current += 1;
+    disposeComponentEngines(componentPhysicsEnginesRef.current);
+    componentPhysicsEnginesRef.current = null;
     setVehicleId(nextVehicleId);
     setIsSimulationPaused(false);
     isSimulationPausedRef.current = false;
@@ -2670,6 +4113,18 @@ export function TheaterWorkbench() {
       )}
 
       {!isSimulationActive && !simulationReport && (
+        <ComponentMaterialPanel
+          baseMaterial={environmentParams.material}
+          componentMaterials={componentMaterialSelections}
+          materialCatalog={materialCatalog}
+          costEstimate={materialCostEstimate}
+          onChange={setComponentMaterial}
+          onApplyBase={applyBaseMaterialToComponents}
+          onApplyPreset={applyComponentMaterialPreset}
+        />
+      )}
+
+      {!isSimulationActive && !simulationReport && (
         <aside className="env-panel" aria-label="Input panel">
           <div className="env-panel__head">
             <div className="env-panel__title-stack">
@@ -2701,21 +4156,6 @@ export function TheaterWorkbench() {
                   ))}
                 </div>
               </div>
-
-              <label className="material-input">
-                <span className="material-input__label">Material</span>
-                <select
-                  className="material-input__select"
-                  value={environmentParams.material}
-                  onChange={(event) => setEnvironmentField("material", event.target.value)}
-                >
-                  {MATERIAL_OPTIONS.map((material) => (
-                    <option key={material} value={material}>
-                      {material}
-                    </option>
-                  ))}
-                </select>
-              </label>
             </section>
 
             <section

@@ -18,6 +18,7 @@ struct EngineSnapshot {
     environment: EnvironmentSample,
     derivatives: HealthDerivatives,
     subsystems: SubsystemHealth,
+    components: ComponentHealth,
     vehicle_health: f64,
     thresholds: EnvironmentalThresholds,
     coefficients: CoefficientMatrix,
@@ -77,9 +78,9 @@ impl Engine {
     }
 
     pub fn get_materials(&self) -> String {
-        let materials: Vec<MaterialProfile> = MaterialGrade::all()
+        let materials: Vec<MaterialMetadata> = material_catalog()
             .iter()
-            .map(|grade| grade.profile())
+            .map(|entry| entry.metadata())
             .collect();
         serde_json::to_string(&materials).unwrap()
     }
@@ -95,6 +96,7 @@ impl Engine {
             environment: self.simulation.last_environment,
             derivatives: self.simulation.last_derivatives,
             subsystems: vehicle.state.subsystems,
+            components: vehicle.state.components,
             vehicle_health: vehicle.state.vehicle_health,
             thresholds: vehicle.properties.thresholds,
             coefficients: vehicle.properties.coefficients,
