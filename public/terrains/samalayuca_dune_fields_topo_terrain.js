@@ -1,28 +1,28 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-export const IRAN_MESR_DESERT_TOPO_CONFIG = Object.freeze({
-  name: "Iran Mesr Desert Sand Dune Terrain",
+export const SAMALAYUCA_DUNE_FIELDS_TOPO_CONFIG = Object.freeze({
+  name: "Samalayuca Dune Fields Topographic Terrain",
   center: {
-    latitude: 34.071,
-    longitude: 54.782,
+    latitude: 31.2636,
+    longitude: -106.3953,
   },
-  location: "Mesr Desert dune field, Dasht-e Kavir, Isfahan Province, Iran",
-  centerElevationMetersAsl: 720,
+  location: "Medanos de Samalayuca, Chihuahuan Desert, Chihuahua, Mexico",
+  centerElevationMetersAsl: 1180,
   terrainSizeMeters: 1000,
   verticalExaggeration: 0.75,
   contourIntervalMeters: 25,
   note:
-    "Procedural public terrain model inspired by the Mesr Desert dune field in Dasht-e Kavir. It is not a surveyed DEM tile.",
+    "Procedural public terrain model inspired by the Samalayuca dune fields in the Chihuahuan Desert. It is not a surveyed DEM tile.",
 });
 
-const CONFIG = IRAN_MESR_DESERT_TOPO_CONFIG;
+const CONFIG = SAMALAYUCA_DUNE_FIELDS_TOPO_CONFIG;
 const TERRAIN_SIZE = CONFIG.terrainSizeMeters;
 const HALF_TERRAIN = TERRAIN_SIZE / 2;
 const GRID_SEGMENTS = 220;
 const VERTICAL_EXAGGERATION = CONFIG.verticalExaggeration;
-const SEED = 30648057;
-const FOG_COLOR = 0xd8cdb9;
+const SEED = 31263106;
+const FOG_COLOR = 0xdcd2bd;
 const RADIAL_FOG = Object.freeze({
   innerRadiusMeters: 500,
   outerRadiusMeters: 1000,
@@ -34,40 +34,40 @@ const RADIAL_FOG = Object.freeze({
 
 const MATERIALS = {
   rock: new THREE.MeshStandardMaterial({
-    color: 0x756854,
+    color: 0x7b715f,
     roughness: 0.96,
     metalness: 0.02,
   }),
   contourMinor: new THREE.LineBasicMaterial({
-    color: 0x8e7058,
+    color: 0x907d64,
     transparent: true,
     opacity: 0.42,
     fog: true,
   }),
   contourMajor: new THREE.LineBasicMaterial({
-    color: 0x5d4637,
+    color: 0x62513f,
     transparent: true,
     opacity: 0.7,
     fog: true,
   }),
   washFloor: new THREE.MeshStandardMaterial({
-    color: 0xcfa873,
+    color: 0xd8c39a,
     roughness: 0.96,
     metalness: 0,
   }),
   duneCrest: new THREE.LineBasicMaterial({
-    color: 0xf7d99b,
+    color: 0xf7e6ba,
     transparent: true,
     opacity: 0.42,
     fog: true,
   }),
   dryShrub: new THREE.MeshStandardMaterial({
-    color: 0x776542,
+    color: 0x6e7349,
     roughness: 0.98,
     metalness: 0,
   }),
   cactusPad: new THREE.MeshStandardMaterial({
-    color: 0x4f7f49,
+    color: 0x4f834f,
     roughness: 0.9,
     metalness: 0,
   }),
@@ -78,7 +78,7 @@ const MATERIALS = {
   }),
 };
 
-export function createIranMesrDesertTopoScene(container = document.body, options = {}) {
+export function createSamalayucaDuneFieldsScene(container = document.body, options = {}) {
   const target = typeof container === "string" ? document.querySelector(container) : container;
 
   if (!target) {
@@ -174,22 +174,22 @@ export function terrainElevationMetersAt(xMetersEast, zMetersNorth) {
   const basinTilt = 0.0055 * zMetersNorth - 0.0025 * xMetersEast;
   const rollingDunes =
     duneEnvelope *
-    (17.5 * primaryWave +
-      7.5 * secondaryWave +
-      3.8 * crossRipple +
-      5.2 * Math.pow(Math.max(0, primaryWave), 2.1));
-  const interduneSwales = -7.8 * valleyScore;
+    (20 * primaryWave +
+      8.8 * secondaryWave +
+      3.1 * crossRipple +
+      4.2 * Math.pow(Math.max(0, primaryWave), 2.1));
+  const interduneSwales = -6.2 * valleyScore;
   const broadSandSheet =
-    7.5 * Math.sin((u + 180) * 0.006) * Math.exp(-Math.pow(v / 730, 2)) +
-    5.2 * fbm(xMetersEast * 0.004 + 12, zMetersNorth * 0.004 - 3, 4);
+    6.4 * Math.sin((u + 180) * 0.0048) * Math.exp(-Math.pow(v / 780, 2)) +
+    4.5 * fbm(xMetersEast * 0.0036 + 12, zMetersNorth * 0.0036 - 3, 4);
   const softDryWashes =
-    -5.4 * desertWash(u + 165 + 18 * Math.sin(v * 0.008), v, -160, 450) +
-    -3.8 * desertWash(u - 215 + 14 * Math.cos(v * 0.009), v, 160, 390);
+    -3.8 * desertWash(u + 170 + 18 * Math.sin(v * 0.007), v, -160, 470) +
+    -2.9 * desertWash(u - 220 + 14 * Math.cos(v * 0.008), v, 160, 410);
   const fineSandTexture =
-    1.6 * fbm(xMetersEast * 0.019 + 19, zMetersNorth * 0.019 - 7, 4) +
-    0.9 * fbm(u * 0.046 - 4, v * 0.046 + 23, 3);
+    1.2 * fbm(xMetersEast * 0.017 + 19, zMetersNorth * 0.017 - 7, 4) +
+    0.7 * fbm(u * 0.04 - 4, v * 0.04 + 23, 3);
 
-  return basinTilt + rollingDunes + interduneSwales + broadSandSheet + softDryWashes + fineSandTexture - 16;
+  return basinTilt + rollingDunes + interduneSwales + broadSandSheet + softDryWashes + fineSandTexture - 14;
 }
 
 export function renderHeightMetersAt(xMetersEast, zMetersNorth) {
@@ -208,7 +208,7 @@ export function metersToLatLon(xMetersEast, zMetersNorth) {
 }
 
 function desertFrame(xMetersEast, zMetersNorth) {
-  const angle = THREE.MathUtils.degToRad(-18);
+  const angle = THREE.MathUtils.degToRad(-12);
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
 
@@ -219,7 +219,7 @@ function desertFrame(xMetersEast, zMetersNorth) {
 }
 
 function fromDesertFrame(u, v) {
-  const angle = THREE.MathUtils.degToRad(-18);
+  const angle = THREE.MathUtils.degToRad(-12);
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
 
@@ -230,12 +230,12 @@ function fromDesertFrame(u, v) {
 }
 
 function dunePhaseAt(u, v) {
-  const windWander = 34 * fbm(v * 0.0035 + 9, u * 0.002 - 13, 4);
-  return (u + windWander) * 0.027 + v * 0.0055;
+  const windWander = 40 * fbm(v * 0.003 + 9, u * 0.0018 - 13, 4);
+  return (u + windWander) * 0.02 + v * 0.0046;
 }
 
 function duneFieldEnvelopeAt(u, v) {
-  return Math.exp(-Math.pow(u / 610, 2)) * Math.exp(-Math.pow(v / 780, 2));
+  return Math.exp(-Math.pow(u / 660, 2)) * Math.exp(-Math.pow(v / 840, 2));
 }
 
 function duneValleyScoreAt(xMetersEast, zMetersNorth) {
@@ -340,7 +340,7 @@ function addTerrain(scene, terrainData) {
   });
 
   const terrain = new THREE.Mesh(geometry, material);
-  terrain.name = "1 km square Iranian desert topographic terrain";
+  terrain.name = "1 km square Samalayuca dune field topographic terrain";
   terrain.receiveShadow = true;
   scene.add(terrain);
 }
@@ -471,12 +471,12 @@ function addDryWashChannels(scene) {
 function addDuneCrestLines(scene) {
   const segments = [];
 
-  for (let ridge = -4; ridge <= 5; ridge += 1) {
+  for (let ridge = -3; ridge <= 4; ridge += 1) {
     let previous = null;
 
     for (let i = 0; i <= 48; i += 1) {
       const v = THREE.MathUtils.lerp(-420, 520, i / 48);
-      const u = 40 + ridge * 112 + 18 * Math.sin(v * 0.009 + ridge * 0.6);
+      const u = 32 + ridge * 145 + 20 * Math.sin(v * 0.007 + ridge * 0.6);
       const world = fromDesertFrame(u, v);
 
       if (Math.abs(world.x) > HALF_TERRAIN - 30 || Math.abs(world.z) > HALF_TERRAIN - 30) {
@@ -849,22 +849,22 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, radialFogColor, radialFogAmount);`,
 }
 
 function desertColorAt(x, z, elevation, slope) {
-  const normalizedElevation = THREE.MathUtils.clamp((elevation + 38) / 76, 0, 1);
+  const normalizedElevation = THREE.MathUtils.clamp((elevation + 34) / 76, 0, 1);
   const valleyScore = duneValleyScoreAt(x, z);
-  const windNoise = fbm(x * 0.018 - 7, z * 0.018 + 13, 4);
-  const fineNoise = fbm(x * 0.043 + 22, z * 0.043 - 4, 4);
+  const windNoise = fbm(x * 0.016 - 7, z * 0.016 + 13, 4);
+  const fineNoise = fbm(x * 0.039 + 22, z * 0.039 - 4, 4);
 
-  const base = new THREE.Color(0xdcae6c);
-  const duneGold = new THREE.Color(0xf2cc82);
-  const crestSand = new THREE.Color(0xefbd70);
-  const interduneFlat = new THREE.Color(0xd6be96);
-  const slopeShadow = new THREE.Color(0xa88661);
+  const base = new THREE.Color(0xe4c99b);
+  const silicaSand = new THREE.Color(0xf2dfb7);
+  const crestSand = new THREE.Color(0xecd09a);
+  const interduneFlat = new THREE.Color(0xd3c2a5);
+  const slopeShadow = new THREE.Color(0xb49a73);
 
-  base.lerp(duneGold, THREE.MathUtils.clamp((windNoise - 0.18) * 0.35, 0, 0.24));
-  base.lerp(crestSand, normalizedElevation * 0.22);
-  base.lerp(interduneFlat, THREE.MathUtils.clamp(valleyScore * 0.46, 0, 0.46));
-  base.lerp(slopeShadow, THREE.MathUtils.clamp(slope * 0.36, 0, 0.24));
-  base.offsetHSL(0, 0, (fineNoise - 0.5) * 0.035);
+  base.lerp(silicaSand, THREE.MathUtils.clamp((windNoise - 0.12) * 0.36, 0, 0.28));
+  base.lerp(crestSand, normalizedElevation * 0.18);
+  base.lerp(interduneFlat, THREE.MathUtils.clamp(valleyScore * 0.42, 0, 0.42));
+  base.lerp(slopeShadow, THREE.MathUtils.clamp(slope * 0.34, 0, 0.22));
+  base.offsetHSL(0, 0, (fineNoise - 0.5) * 0.028);
 
   return base;
 }
