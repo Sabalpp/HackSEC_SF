@@ -3136,36 +3136,6 @@ function FailureSummarySection({ failures }) {
   );
 }
 
-function ExecutiveSummarySection({ model }) {
-  return (
-    <section
-      className="report-exec-summary"
-      style={{ "--exec-risk-color": executiveRiskColor(model.riskLevel) }}
-      aria-label="Executive summary"
-    >
-      <div className="report-exec-summary__head">
-        <span>Executive Summary</span>
-        <strong>{model.riskLevel} Risk</strong>
-      </div>
-      <div className="report-exec-summary__body">
-        <div className="report-exec-summary__decision">
-          <span>{model.status}</span>
-          <p>{model.recommendation}</p>
-        </div>
-        <p className="report-exec-summary__readout">{model.summary}</p>
-        <div className="report-exec-summary__actions">
-          {model.actions.map((action, index) => (
-            <div className="report-exec-summary__action" key={`${index}-${action}`}>
-              <span>{index + 1}</span>
-              <p>{action}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function CostSummarySection({ model }) {
   return (
     <section className="report-cost-summary" aria-label="Cost estimate">
@@ -3288,7 +3258,6 @@ function SimulationReportPanel({ report, onClose }) {
       </div>
 
       <div className="report-panel__sections">
-        <ExecutiveSummarySection model={executiveModel} />
         <CostSummarySection model={costModel} />
         <FailureSummarySection failures={failures} />
         <ComponentTrendCard item={REPORT_HEALTH_ITEMS[0]} series={report.series} />
