@@ -13,6 +13,9 @@ const VEHICLE_FACTORIES = {
 const DEFAULT_DEPLOYMENT_POINT = Object.freeze({ x: 0, z: 0 });
 const VEHICLE_ALTITUDE = Object.freeze({ ugv: 0.08, drone: 8 });
 const VEHICLE_SPEED = Object.freeze({ ugv: 1.6, drone: 5.5 });
+const DRONE_HOVER_BOB_AMPLITUDE = 0.25;
+const DRONE_HOVER_BOB_PERIOD_MS = 1400;
+const DRONE_MIN_ORBIT_RADIUS = 10;
 const DEFAULT_ROUTE_OFFSETS = Object.freeze([
   Object.freeze({ x: -12, z: -8 }),
   Object.freeze({ x: 8, z: -12 }),
@@ -102,11 +105,27 @@ function createDeploymentPad(normal, height, deploymentPoint, vehicleId) {
   return { pad, texture };
 }
 
-function createRoute(deploymentPoint, routeOffsets) {
+function createRoute(deploymentPoint, routeOffsets, vehicleId) {
   const points = routeOffsets.map((point) => new THREE.Vector2(
     deploymentPoint.x + point.x,
     deploymentPoint.z + point.z,
   ));
+
+  if (vehicleId === "drone") {
+    const center = new THREE.Vector2(deploymentPoint.x, deploymentPoint.z);
+    const radii = points
+      .map((point) => point.distanceTo(center))
+      .filter((distance) => distance > 0.000001);
+    const radius = Math.max(
+      DRONE_MIN_ORBIT_RADIUS,
+      radii.reduce((sum, distance) => sum + distance, 0) / Math.max(1, radii.length),
+    );
+    const startPoint = points[0] ?? center.clone().add(new THREE.Vector2(radius, 0));
+    const startAngle = Math.atan2(startPoint.y - center.y, startPoint.x - center.x);
+
+    return { kind: "orbit", center, radius, startAngle };
+  }
+
   const start = points[0] ?? new THREE.Vector2(deploymentPoint.x, deploymentPoint.z);
   const next = points.find((point) => point.distanceToSquared(start) > 0.000001)
     ?? start.clone().add(new THREE.Vector2(1, 0));
@@ -116,6 +135,15 @@ function createRoute(deploymentPoint, routeOffsets) {
 }
 
 function sampleRoute(route, distanceMeters) {
+  if (route.kind === "orbit") {
+    const angle = route.startAngle + distanceMeters / route.radius;
+    const x = route.center.x + Math.cos(angle) * route.radius;
+    const z = route.center.y + Math.sin(angle) * route.radius;
+    const tangent = new THREE.Vector2(-Math.sin(angle), Math.cos(angle)).normalize();
+
+    return { x, z, tangent };
+  }
+
   const x = route.start.x + route.tangent.x * distanceMeters;
   const z = route.start.y + route.tangent.y * distanceMeters;
 
@@ -261,7 +289,7 @@ export function MappedTerrainVehicleScene({
     const scene = new THREE.Scene();
     addWorld(scene);
 
-    const route = createRoute(deploymentPoint, routeOffsets);
+    const route = createRoute(deploymentPoint, routeOffsets, vehicleId);
     const speed = VEHICLE_SPEED[vehicleId] ?? VEHICLE_SPEED.ugv;
     const initialRouteSample = sampleRoute(route, 0);
     const initialTerrainHeight = renderHeightMetersAt(initialRouteSample.x, initialRouteSample.z);
@@ -364,7 +392,7 @@ export function MappedTerrainVehicleScene({
 
       if (vehicleId === "drone") {
         vehicleMount.position.y =
-          groundHeight + vehicleHeight + (runActive ? Math.sin(now / 1300) * 0.25 : 0);
+          groundHeight + vehicleHeight + Math.sin(now / DRONE_HOVER_BOB_PERIOD_MS) * DRONE_HOVER_BOB_AMPLITUDE;
         vehicleMount.position.x = routeSample.x;
         vehicleMount.position.z = routeSample.z;
         setForwardUpQuaternion(vehicleMount, forward, new THREE.Vector3(0, 1, 0));
@@ -394,7 +422,7 @@ export function MappedTerrainVehicleScene({
       controls.target.add(targetDelta);
       camera.position.add(targetDelta);
 
-      if (runActive && asset && typeof asset.update === "function") {
+      if ((runActive || vehicleId === "drone") && asset && typeof asset.update === "function") {
         asset.update(dt);
       }
       contactEffect.update(dt);
