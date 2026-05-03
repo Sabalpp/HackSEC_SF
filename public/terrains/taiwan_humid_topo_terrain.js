@@ -23,6 +23,7 @@ const GRID_SEGMENTS = 220;
 const VERTICAL_EXAGGERATION = CONFIG.verticalExaggeration;
 const SEED = 248652;
 const FOG_COLOR = 0xdce4e7;
+const CANOPY_VIBRANCY_MULTIPLIER = 1.75;
 const RADIAL_FOG = Object.freeze({
   innerRadiusMeters: 500,
   outerRadiusMeters: 1000,
@@ -44,14 +45,20 @@ const MATERIALS = {
     metalness: 0,
   }),
   canopyDeep: new THREE.MeshStandardMaterial({
-    color: 0x254932,
+    color: 0xedffef,
+    emissive: 0x10381f,
+    emissiveIntensity: 0.28,
     roughness: 0.98,
     metalness: 0,
+    vertexColors: true,
   }),
   canopyLight: new THREE.MeshStandardMaterial({
-    color: 0x4f6e3f,
+    color: 0xf2ffe7,
+    emissive: 0x2d5a24,
+    emissiveIntensity: 0.315,
     roughness: 0.98,
     metalness: 0,
+    vertexColors: true,
   }),
   contourMinor: new THREE.LineBasicMaterial({
     color: 0x416054,
@@ -533,6 +540,9 @@ function addRainforestTrees(scene, terrainData) {
   const roundedCanopyMatrices = [];
   const coarseCanopyMatrices = [];
   const lightCanopyMatrices = [];
+  const roundedCanopyColors = [];
+  const coarseCanopyColors = [];
+  const lightCanopyColors = [];
   const dummy = new THREE.Object3D();
   const patchTreeMultiplier = 2;
   const targetCount = 880 * patchTreeMultiplier;
@@ -599,6 +609,9 @@ function addRainforestTrees(scene, terrainData) {
         roundedCanopyMatrices,
         coarseCanopyMatrices,
         lightCanopyMatrices,
+        roundedCanopyColors,
+        coarseCanopyColors,
+        lightCanopyColors,
       );
       plantedPositions.push({ x, z });
       plantedInPatch += 1;
@@ -613,9 +626,30 @@ function addRainforestTrees(scene, terrainData) {
   trunkMatrices.forEach((matrix, index) => trunks.setMatrixAt(index, matrix));
   scene.add(trunks);
 
-  addTreeInstancedMesh(scene, roundedCanopyGeometry, MATERIALS.canopyDeep, roundedCanopyMatrices, "rounded broadleaf canopy lobes");
-  addTreeInstancedMesh(scene, coarseCanopyGeometry, MATERIALS.canopyDeep, coarseCanopyMatrices, "irregular broadleaf canopy lobes");
-  addTreeInstancedMesh(scene, roundedCanopyGeometry, MATERIALS.canopyLight, lightCanopyMatrices, "lighter wet canopy highlights");
+  addTreeInstancedMesh(
+    scene,
+    roundedCanopyGeometry,
+    MATERIALS.canopyDeep,
+    roundedCanopyMatrices,
+    "rounded broadleaf canopy lobes",
+    roundedCanopyColors,
+  );
+  addTreeInstancedMesh(
+    scene,
+    coarseCanopyGeometry,
+    MATERIALS.canopyDeep,
+    coarseCanopyMatrices,
+    "irregular broadleaf canopy lobes",
+    coarseCanopyColors,
+  );
+  addTreeInstancedMesh(
+    scene,
+    roundedCanopyGeometry,
+    MATERIALS.canopyLight,
+    lightCanopyMatrices,
+    "lighter wet canopy highlights",
+    lightCanopyColors,
+  );
 }
 
 function isNearExistingTree(x, z, positions, minDistance) {
@@ -642,6 +676,9 @@ function plantBroadleafTree(
   roundedCanopyMatrices,
   coarseCanopyMatrices,
   lightCanopyMatrices,
+  roundedCanopyColors,
+  coarseCanopyColors,
+  lightCanopyColors,
 ) {
   const ground = renderHeightMetersAt(x, z);
   const heightPenalty = THREE.MathUtils.clamp((elevation - 170) / 360, 0, 0.32);
@@ -675,6 +712,7 @@ function plantBroadleafTree(
     const scaleY = lobeRadius * verticalFactor * randomRange(random, 0.68, 1.0);
     const scaleZ = lobeRadius * randomRange(random, 0.68, 1.08);
     const targetMatrices = isCore || random() < 0.58 ? roundedCanopyMatrices : coarseCanopyMatrices;
+    const targetColors = targetMatrices === roundedCanopyMatrices ? roundedCanopyColors : coarseCanopyColors;
 
     setMatrix(
       dummy,
@@ -689,6 +727,7 @@ function plantBroadleafTree(
       scaleZ,
     );
     targetMatrices.push(dummy.matrix.clone());
+    targetColors.push(canopyBlobColor(random, elevation, false));
   }
 
   const highlightCount = random() < 0.82 ? 1 : 2;
@@ -710,15 +749,36 @@ function plantBroadleafTree(
       glintRadius * randomRange(random, 0.72, 1.2),
     );
     lightCanopyMatrices.push(dummy.matrix.clone());
+    lightCanopyColors.push(canopyBlobColor(random, elevation, true));
   }
 }
 
-function addTreeInstancedMesh(scene, geometry, material, matrices, name) {
+function canopyBlobColor(random, elevation, isHighlight) {
+  const uplandFade = THREE.MathUtils.clamp((elevation - 110) / 260, 0, 0.16);
+  const hue = randomRange(random, 0.275, 0.39);
+  const saturation = isHighlight ? randomRange(random, 0.78, 1) : randomRange(random, 0.66, 0.96);
+  const lightness = isHighlight ? randomRange(random, 0.58, 0.74) : randomRange(random, 0.42, 0.58);
+  const boostedSaturation = (saturation - uplandFade * 0.28) * CANOPY_VIBRANCY_MULTIPLIER;
+  const color = new THREE.Color();
+
+  color.setHSL(hue, THREE.MathUtils.clamp(boostedSaturation, 0.54, 1), lightness);
+  return color;
+}
+
+function addTreeInstancedMesh(scene, geometry, material, matrices, name, colors = []) {
   const mesh = new THREE.InstancedMesh(geometry, material, matrices.length);
   mesh.name = name;
   mesh.castShadow = true;
   mesh.receiveShadow = true;
-  matrices.forEach((matrix, index) => mesh.setMatrixAt(index, matrix));
+  matrices.forEach((matrix, index) => {
+    mesh.setMatrixAt(index, matrix);
+    if (colors[index]) {
+      mesh.setColorAt(index, colors[index]);
+    }
+  });
+  if (colors.length > 0) {
+    mesh.instanceColor.needsUpdate = true;
+  }
   scene.add(mesh);
 }
 
@@ -983,26 +1043,26 @@ function humidTerrainColorAt(x, z, elevation, slope) {
   const moisture = THREE.MathUtils.clamp(1 - across / 280, 0, 1);
   const canopyNoise = fbm(x * 0.017 - 12, z * 0.017 + 7, 5);
   const scarNoise = fbm(x * 0.036 + 18, z * 0.036 - 22, 3);
-  const base = new THREE.Color(0x2f5a3f);
-  const wetLowland = new THREE.Color(0x213f32);
-  const upperForest = new THREE.Color(0x536d42);
-  const fernHighlight = new THREE.Color(0x6d824f);
-  const clayScar = new THREE.Color(0x8b795f);
-  const wetStone = new THREE.Color(0x59665e);
-  const riverMoss = new THREE.Color(0x24483b);
+  const base = new THREE.Color(0x448853);
+  const wetLowland = new THREE.Color(0x2b6f47);
+  const upperForest = new THREE.Color(0x6d9a50);
+  const fernHighlight = new THREE.Color(0x8fb862);
+  const clayScar = new THREE.Color(0x6b8457);
+  const wetStone = new THREE.Color(0x53685c);
+  const riverMoss = new THREE.Color(0x2b7051);
 
-  base.lerp(wetLowland, moisture * 0.28);
-  base.lerp(upperForest, normalizedElevation * 0.34 + canopyNoise * 0.14);
+  base.lerp(wetLowland, moisture * 0.22);
+  base.lerp(upperForest, normalizedElevation * 0.28 + canopyNoise * 0.12);
 
   if (canopyNoise > 0.62) {
-    base.lerp(fernHighlight, 0.14);
+    base.lerp(fernHighlight, 0.16);
   }
 
-  base.lerp(riverMoss, Math.exp(-Math.pow(across / 58, 2)) * 0.26);
-  base.lerp(wetStone, THREE.MathUtils.clamp(slope * 0.18, 0, 0.2));
+  base.lerp(riverMoss, Math.exp(-Math.pow(across / 58, 2)) * 0.18);
+  base.lerp(wetStone, THREE.MathUtils.clamp(slope * 0.12, 0, 0.14));
 
   if (slope > 0.48 && scarNoise > 0.6) {
-    base.lerp(clayScar, THREE.MathUtils.clamp((slope - 0.44) * 1.55, 0.16, 0.5));
+    base.lerp(clayScar, THREE.MathUtils.clamp((slope - 0.44) * 1.2, 0.1, 0.32));
   }
 
   return base;
