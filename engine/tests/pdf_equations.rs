@@ -177,3 +177,71 @@ fn material_table_matches_pdf_values() {
     assert!(al5083.cold_threshold_c.is_none());
     approx(al5083.uv_coeff.unwrap(), 0.01);
 }
+
+#[test]
+fn diagnostics_reset_to_all_subsystems_with_no_active_factors() {
+    let engine = Engine::new();
+    let diagnostics: serde_json::Value = serde_json::from_str(&engine.get_diagnostics()).unwrap();
+    let subsystems = diagnostics["subsystems"].as_object().unwrap();
+
+    for subsystem in ["chassis", "sensors", "battery", "engine", "hydraulics"] {
+        approx(subsystems[subsystem]["dx_dt"].as_f64().unwrap(), 0.0);
+        assert_eq!(
+            subsystems[subsystem]["factors"].as_array().unwrap().len(),
+            0
+        );
+    }
+}
+
+#[test]
+fn diagnostics_report_latest_factor_contributions_sorted_by_impact() {
+    let mut engine = Engine::new();
+    engine.set_time_step(0.1);
+    engine.tick(700.0, 0.1, 0.8, 0.4, 0.0);
+
+    let diagnostics: serde_json::Value = serde_json::from_str(&engine.get_diagnostics()).unwrap();
+    let engine_diagnostics = &diagnostics["subsystems"]["engine"];
+    let engine_factors = engine_diagnostics["factors"].as_array().unwrap();
+
+    assert_eq!(engine_factors[0]["id"], "dust_ingestion");
+    assert_eq!(engine_factors[0]["label"], "Dust ingestion");
+    assert_eq!(engine_factors[1]["id"], "extreme_heat");
+    approx(
+        engine_diagnostics["dx_dt"].as_f64().unwrap(),
+        engine_factors
+            .iter()
+            .map(|factor| factor["dx_dt"].as_f64().unwrap())
+            .sum(),
+    );
+
+    let battery_diagnostics = &diagnostics["subsystems"]["battery"];
+    assert_eq!(battery_diagnostics["factors"][0]["id"], "extreme_heat");
+    approx(
+        battery_diagnostics["dx_dt"].as_f64().unwrap(),
+        battery_diagnostics["factors"][0]["dx_dt"].as_f64().unwrap(),
+    );
+}
+
+#[test]
+fn diagnostics_clear_after_reset() {
+    let mut engine = Engine::new();
+    engine.tick(700.0, 0.1, 0.8, 0.4, 0.0);
+    engine.reset();
+
+    let diagnostics: serde_json::Value = serde_json::from_str(&engine.get_diagnostics()).unwrap();
+    for subsystem in ["chassis", "sensors", "battery", "engine", "hydraulics"] {
+        approx(
+            diagnostics["subsystems"][subsystem]["dx_dt"]
+                .as_f64()
+                .unwrap(),
+            0.0,
+        );
+        assert_eq!(
+            diagnostics["subsystems"][subsystem]["factors"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0,
+        );
+    }
+}

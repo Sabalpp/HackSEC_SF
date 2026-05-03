@@ -72,6 +72,10 @@ impl Engine {
         serde_json::to_string(&self.snapshot()).unwrap()
     }
 
+    pub fn get_diagnostics(&self) -> String {
+        serde_json::to_string(&self.simulation.last_diagnostics).unwrap()
+    }
+
     pub fn get_materials(&self) -> String {
         let materials: Vec<MaterialProfile> = MaterialGrade::all()
             .iter()

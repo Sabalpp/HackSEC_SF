@@ -1,6 +1,8 @@
 use crate::*;
 use serde::{Deserialize, Serialize};
 
+const ACTIVE_FACTOR_EPSILON: f64 = 1e-12;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct EnvironmentSample {
     pub temperature_c: f64,
@@ -41,26 +43,138 @@ impl HealthDerivatives {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct EnvironmentalFactorContribution {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub derivatives: HealthDerivatives,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FactorDiagnostic {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub dx_dt: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SubsystemDiagnostic {
+    pub dx_dt: f64,
+    pub factors: Vec<FactorDiagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiagnosticsSubsystems {
+    pub chassis: SubsystemDiagnostic,
+    pub sensors: SubsystemDiagnostic,
+    pub battery: SubsystemDiagnostic,
+    pub engine: SubsystemDiagnostic,
+    pub hydraulics: SubsystemDiagnostic,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiagnosticsSnapshot {
+    pub subsystems: DiagnosticsSubsystems,
+}
+
+impl Default for DiagnosticsSnapshot {
+    fn default() -> Self {
+        Self::from_factor_contributions(&[])
+    }
+}
+
+impl DiagnosticsSnapshot {
+    pub fn from_factor_contributions(contributions: &[EnvironmentalFactorContribution]) -> Self {
+        Self {
+            subsystems: DiagnosticsSubsystems {
+                chassis: diagnostic_for_subsystem(SubsystemKind::Chassis, contributions),
+                sensors: diagnostic_for_subsystem(SubsystemKind::Sensors, contributions),
+                battery: diagnostic_for_subsystem(SubsystemKind::Battery, contributions),
+                engine: diagnostic_for_subsystem(SubsystemKind::Engine, contributions),
+                hydraulics: diagnostic_for_subsystem(SubsystemKind::Hydraulics, contributions),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SubsystemKind {
+    Engine,
+    Battery,
+    Hydraulics,
+    Sensors,
+    Chassis,
+}
+
 pub fn compute_derivatives(
     properties: &VehicleProperties,
     sample: EnvironmentSample,
 ) -> HealthDerivatives {
     let mut derivatives = HealthDerivatives::default();
-    derivatives.add(extreme_heat(properties, sample.temperature_c));
-    derivatives.add(extreme_cold(properties, sample.temperature_c));
-    derivatives.add(dust_ingestion(properties, sample.particulate_concentration));
-    derivatives.add(humidity(properties, sample.relative_humidity));
-    derivatives.add(salinity(properties, sample.salinity_concentration));
-    derivatives.add(uv_solar_radiation(properties, sample.irradiance));
+    for contribution in compute_factor_contributions(properties, sample) {
+        derivatives.add(contribution.derivatives);
+    }
     derivatives
 }
 
-pub fn apply_environmental_modules(
+pub fn compute_factor_contributions(
+    properties: &VehicleProperties,
+    sample: EnvironmentSample,
+) -> Vec<EnvironmentalFactorContribution> {
+    vec![
+        EnvironmentalFactorContribution {
+            id: "extreme_heat",
+            label: "Extreme heat",
+            derivatives: extreme_heat(properties, sample.temperature_c),
+        },
+        EnvironmentalFactorContribution {
+            id: "extreme_cold",
+            label: "Extreme cold",
+            derivatives: extreme_cold(properties, sample.temperature_c),
+        },
+        EnvironmentalFactorContribution {
+            id: "dust_ingestion",
+            label: "Dust ingestion",
+            derivatives: dust_ingestion(properties, sample.particulate_concentration),
+        },
+        EnvironmentalFactorContribution {
+            id: "humidity",
+            label: "Humidity",
+            derivatives: humidity(properties, sample.relative_humidity),
+        },
+        EnvironmentalFactorContribution {
+            id: "salinity",
+            label: "Salinity",
+            derivatives: salinity(properties, sample.salinity_concentration),
+        },
+        EnvironmentalFactorContribution {
+            id: "uv_solar_radiation",
+            label: "UV / solar radiation",
+            derivatives: uv_solar_radiation(properties, sample.irradiance),
+        },
+    ]
+}
+
+pub fn compute_diagnostics(
+    properties: &VehicleProperties,
+    sample: EnvironmentSample,
+) -> DiagnosticsSnapshot {
+    let contributions = compute_factor_contributions(properties, sample);
+    DiagnosticsSnapshot::from_factor_contributions(&contributions)
+}
+
+pub fn evaluate_environmental_modules(
     vehicle: &mut Vehicle,
     sample: EnvironmentSample,
     dt_s: f64,
-) -> HealthDerivatives {
-    let derivatives = compute_derivatives(&vehicle.properties, sample);
+) -> (HealthDerivatives, DiagnosticsSnapshot) {
+    let contributions = compute_factor_contributions(&vehicle.properties, sample);
+    let mut derivatives = HealthDerivatives::default();
+    for contribution in &contributions {
+        derivatives.add(contribution.derivatives);
+    }
+    let diagnostics = DiagnosticsSnapshot::from_factor_contributions(&contributions);
+
     vehicle
         .state
         .subsystems
@@ -68,6 +182,16 @@ pub fn apply_environmental_modules(
     vehicle.state.elapsed_s += dt_s.max(0.0);
     vehicle.state.frame += 1;
     vehicle.state.update_vehicle_health();
+
+    (derivatives, diagnostics)
+}
+
+pub fn apply_environmental_modules(
+    vehicle: &mut Vehicle,
+    sample: EnvironmentSample,
+    dt_s: f64,
+) -> HealthDerivatives {
+    let (derivatives, _) = evaluate_environmental_modules(vehicle, sample, dt_s);
     derivatives
 }
 
@@ -159,5 +283,57 @@ pub fn uv_solar_radiation(properties: &VehicleProperties, irradiance: f64) -> He
         hydraulics: -c.hydraulics_uv * u,
         sensors: -c.sensors_uv * u,
         chassis: 0.0,
+    }
+}
+
+fn diagnostic_for_subsystem(
+    subsystem: SubsystemKind,
+    contributions: &[EnvironmentalFactorContribution],
+) -> SubsystemDiagnostic {
+    let mut factors: Vec<FactorDiagnostic> = contributions
+        .iter()
+        .filter_map(|contribution| {
+            let dx_dt = contribution.derivatives.for_subsystem(subsystem);
+            (dx_dt.abs() > ACTIVE_FACTOR_EPSILON).then_some(FactorDiagnostic {
+                id: contribution.id,
+                label: contribution.label,
+                dx_dt,
+            })
+        })
+        .collect();
+
+    factors.sort_by(|left, right| {
+        right
+            .dx_dt
+            .abs()
+            .total_cmp(&left.dx_dt.abs())
+            .then_with(|| left.id.cmp(right.id))
+    });
+
+    let dx_dt = factors.iter().map(|factor| factor.dx_dt).sum::<f64>();
+
+    SubsystemDiagnostic {
+        dx_dt: clean_zero(dx_dt),
+        factors,
+    }
+}
+
+impl HealthDerivatives {
+    fn for_subsystem(&self, subsystem: SubsystemKind) -> f64 {
+        match subsystem {
+            SubsystemKind::Engine => self.engine,
+            SubsystemKind::Battery => self.battery,
+            SubsystemKind::Hydraulics => self.hydraulics,
+            SubsystemKind::Sensors => self.sensors,
+            SubsystemKind::Chassis => self.chassis,
+        }
+    }
+}
+
+fn clean_zero(value: f64) -> f64 {
+    if value.abs() <= ACTIVE_FACTOR_EPSILON {
+        0.0
+    } else {
+        value
     }
 }

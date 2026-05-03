@@ -6,6 +6,7 @@ pub struct Simulation {
     pub dt_s: f64,
     pub last_environment: EnvironmentSample,
     pub last_derivatives: HealthDerivatives,
+    pub last_diagnostics: DiagnosticsSnapshot,
 }
 
 impl Default for Simulation {
@@ -21,6 +22,7 @@ impl Simulation {
             dt_s: 1.0,
             last_environment: EnvironmentSample::default(),
             last_derivatives: HealthDerivatives::default(),
+            last_diagnostics: DiagnosticsSnapshot::default(),
         }
     }
 
@@ -33,7 +35,10 @@ impl Simulation {
 
     pub fn tick(&mut self, sample: EnvironmentSample) -> &VehicleState {
         self.last_environment = sample;
-        self.last_derivatives = apply_environmental_modules(&mut self.vehicle, sample, self.dt_s);
+        let (derivatives, diagnostics) =
+            evaluate_environmental_modules(&mut self.vehicle, sample, self.dt_s);
+        self.last_derivatives = derivatives;
+        self.last_diagnostics = diagnostics;
         &self.vehicle.state
     }
 
@@ -42,12 +47,14 @@ impl Simulation {
         self.vehicle = Vehicle::configured(material_grade);
         self.last_environment = EnvironmentSample::default();
         self.last_derivatives = HealthDerivatives::default();
+        self.last_diagnostics = DiagnosticsSnapshot::default();
     }
 
     pub fn set_material(&mut self, material: &str) -> bool {
         if let Some(material_grade) = MaterialGrade::from_key(material) {
             self.vehicle = Vehicle::configured(material_grade);
             self.last_derivatives = HealthDerivatives::default();
+            self.last_diagnostics = DiagnosticsSnapshot::default();
             true
         } else {
             false

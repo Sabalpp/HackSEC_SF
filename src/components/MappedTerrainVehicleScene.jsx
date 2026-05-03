@@ -347,14 +347,10 @@ export function MappedTerrainVehicleScene({
     let raf = 0;
     let last = performance.now();
     let routeDistance = 0;
-    let runActive = runToken > 0;
     function tick(now) {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
-
-      if (!simulationActiveRef.current) {
-        runActive = false;
-      }
+      const runActive = runToken > 0 && simulationActiveRef.current;
 
       if (runActive) {
         routeDistance += speed * dt;

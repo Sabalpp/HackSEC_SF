@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import initPhysicsEngine, { Engine as PhysicsEngine } from "../../pkg/engine.js";
 import { theaters } from "../data/theaters";
@@ -156,6 +157,16 @@ const DEFAULT_HEALTH_SNAPSHOT = Object.freeze({
     battery: 1,
     engine: 1,
     hydraulics: 1,
+  }),
+});
+
+const DEFAULT_DIAGNOSTICS = Object.freeze({
+  subsystems: Object.freeze({
+    chassis: Object.freeze({ dx_dt: 0, factors: Object.freeze([]) }),
+    sensors: Object.freeze({ dx_dt: 0, factors: Object.freeze([]) }),
+    battery: Object.freeze({ dx_dt: 0, factors: Object.freeze([]) }),
+    engine: Object.freeze({ dx_dt: 0, factors: Object.freeze([]) }),
+    hydraulics: Object.freeze({ dx_dt: 0, factors: Object.freeze([]) }),
   }),
 });
 
@@ -353,12 +364,12 @@ const ENVIRONMENT_FIELDS = [
     label: "Temperature",
     min: -80,
     max: 170,
-    step: 1,
+    step: 0.1,
     minLabel: "Extreme -80°F",
     maxLabel: "Extreme 170°F",
     accent: "#60a5fa",
     accentRgb: "96,165,250",
-    format: (value) => `${value}°F`,
+    format: (value) => `${value.toFixed(1)}°F`,
   },
   {
     id: "dustMgM3",
@@ -366,7 +377,7 @@ const ENVIRONMENT_FIELDS = [
     label: "Dust concentration",
     min: 0,
     max: 10,
-    step: 0.1,
+    step: 0.01,
     minLabel: "0 mg/m³",
     maxLabel: "High particulate",
     accent: "#f59e0b",
@@ -379,12 +390,12 @@ const ENVIRONMENT_FIELDS = [
     label: "Relative humidity",
     min: 0,
     max: 100,
-    step: 1,
+    step: 0.1,
     minLabel: "0%",
     maxLabel: "100%",
     accent: "#22c55e",
     accentRgb: "34,197,94",
-    format: (value) => `${value}%`,
+    format: (value) => `${value.toFixed(1)}%`,
   },
   {
     id: "salinityPct",
@@ -392,7 +403,7 @@ const ENVIRONMENT_FIELDS = [
     label: "Salinity concentration",
     min: 0,
     max: 10,
-    step: 0.1,
+    step: 0.01,
     minLabel: "0%",
     midLabel: "3.5% seawater",
     maxLabel: "10%",
@@ -406,12 +417,12 @@ const ENVIRONMENT_FIELDS = [
     label: "UV irradiance",
     min: 0,
     max: 1000,
-    step: 10,
+    step: 1,
     minLabel: "0 W/m²",
     maxLabel: "Peak solar 1000 W/m²",
     accent: "#eab308",
     accentRgb: "234,179,8",
-    format: (value) => `${value} W/m²`,
+    format: (value) => `${Math.round(value)} W/m²`,
   },
 ];
 
@@ -524,6 +535,45 @@ const parsePhysicsSnapshot = (snapshotJson) => {
     console.error("Unable to parse physics engine snapshot", error);
   }
   return DEFAULT_HEALTH_SNAPSHOT;
+};
+
+const normalizeDiagnostics = (diagnostics) => ({
+  subsystems: Object.fromEntries(
+    Object.keys(DEFAULT_HEALTH_SNAPSHOT.subsystems).map((subsystem) => {
+      const subsystemDiagnostics = diagnostics?.subsystems?.[subsystem] ?? {};
+      const factors = Array.isArray(subsystemDiagnostics.factors)
+        ? subsystemDiagnostics.factors
+            .map((factor) => ({
+              id: String(factor.id ?? factor.label ?? "factor"),
+              label: String(factor.label ?? factor.id ?? "Environmental factor"),
+              dx_dt: Number.isFinite(Number(factor.dx_dt)) ? Number(factor.dx_dt) : 0,
+            }))
+            .filter((factor) => Math.abs(factor.dx_dt) > 0)
+        : [];
+
+      return [
+        subsystem,
+        {
+          dx_dt: Number.isFinite(Number(subsystemDiagnostics.dx_dt))
+            ? Number(subsystemDiagnostics.dx_dt)
+            : 0,
+          factors,
+        },
+      ];
+    }),
+  ),
+});
+
+const parsePhysicsDiagnostics = (diagnosticsJson) => {
+  if (!diagnosticsJson) return DEFAULT_DIAGNOSTICS;
+
+  try {
+    const parsed = JSON.parse(diagnosticsJson);
+    if (parsed && parsed.subsystems) return normalizeDiagnostics(parsed);
+  } catch (error) {
+    console.error("Unable to parse physics engine diagnostics", error);
+  }
+  return DEFAULT_DIAGNOSTICS;
 };
 
 const ensurePhysicsEngineRuntime = () => {
@@ -758,10 +808,12 @@ const buildReportPdf = (report) => {
 
   const failureSummaryY = 536;
   filledAndStrokedRect(margin, failureSummaryY, PDF_PAGE_WIDTH - margin * 2, 48, "1.00 1.00 1.00", "0.82 0.88 0.95");
-  text("FAILURE SUMMARY", margin + 10, failureSummaryY + 35, 7.2, "0.20 0.39 0.72");
+  text("MISSION SUMMARY", margin + 10, failureSummaryY + 35, 7.2, "0.20 0.39 0.72");
   if (!failures.length) {
-    text("No component failures recorded.", margin + 10, failureSummaryY + 18, 8, "0.42 0.50 0.62");
+    text("Mission Passed", margin + 422, failureSummaryY + 35, 7.2, "0.23 0.55 0.34");
+    text("No failures", margin + 10, failureSummaryY + 18, 8, "0.42 0.50 0.62");
   } else {
+    text(`${failures.length} parts failed`, margin + 408, failureSummaryY + 35, 7.2, "0.78 0.18 0.18");
     const visibleFailures = failures.slice(0, 8);
     const summaryColumnWidth = (PDF_PAGE_WIDTH - margin * 2 - 28) / 2;
     visibleFailures.forEach((failure, index) => {
@@ -872,11 +924,15 @@ function ComponentTrendCard({ item, series }) {
 }
 
 function FailureSummarySection({ failures }) {
+  const statusLabel = failures.length
+    ? `${failures.length} parts failed`
+    : "Mission Passed";
+
   return (
-    <section className="report-failure-summary" aria-label="Failure summary">
+    <section className="report-failure-summary" aria-label="Mission summary">
       <div className="report-failure-summary__head">
-        <span>Failure Summary</span>
-        <strong>{failures.length ? `${failures.length} failed` : "No failures"}</strong>
+        <span>Mission Summary</span>
+        <strong data-status={failures.length ? "failed" : "passed"}>{statusLabel}</strong>
       </div>
       {failures.length ? (
         <div className="report-failure-summary__grid">
@@ -905,7 +961,7 @@ function FailureSummarySection({ failures }) {
           ))}
         </div>
       ) : (
-        <p>No component failures recorded.</p>
+        <p>No failures</p>
       )}
     </section>
   );
@@ -1002,17 +1058,80 @@ function SimulationReportPanel({ report, onClose }) {
   );
 }
 
-function VehicleHealthPanel({ snapshot }) {
+const formatDerivativeRate = (value) => {
+  const numericValue = Number(value) || 0;
+  const percentValue = numericValue * 100;
+  const absValue = Math.abs(percentValue);
+  const precision = absValue >= 10 ? 1 : absValue >= 1 ? 2 : 3;
+  const sign = percentValue > 0 ? "+" : percentValue < 0 ? "-" : "";
+  return `${sign}${absValue.toFixed(precision)}%/day`;
+};
+
+function DiagnosticsHoverCard({ diagnostics }) {
+  const factors = diagnostics?.factors ?? [];
+
+  return (
+    <div className="health-diagnostics" role="tooltip">
+      <div className="health-diagnostics__head">
+        <span>dX/dt</span>
+        <strong>{formatDerivativeRate(diagnostics?.dx_dt ?? 0)}</strong>
+      </div>
+      {factors.length ? (
+        <div className="health-diagnostics__factors">
+          {factors.map((factor) => (
+            <div className="health-diagnostics__factor" key={factor.id}>
+              <span>{factor.label}</span>
+              <strong>{formatDerivativeRate(factor.dx_dt)}</strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p>No active environmental factors.</p>
+      )}
+    </div>
+  );
+}
+
+function VehicleHealthPanel({ snapshot, diagnostics }) {
+  const [activeDiagnostics, setActiveDiagnostics] = useState(null);
   const subsystems = snapshot?.subsystems ?? DEFAULT_HEALTH_SNAPSHOT.subsystems;
   const getSubsystemHealth = (subsystem) => (
     clampHealthUnit(subsystems[subsystem] ?? snapshot?.vehicle_health ?? 1)
   );
+  const getSubsystemDiagnostics = (subsystem) => (
+    diagnostics?.subsystems?.[subsystem] ?? DEFAULT_DIAGNOSTICS.subsystems[subsystem]
+  );
+  const showDiagnostics = (event, label, subsystemDiagnostics) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const popupWidth = 276;
+    const left = Math.max(16, rect.left - popupWidth - 14);
+    const top = Math.max(80, Math.min(window.innerHeight - 80, rect.top + rect.height / 2));
+
+    setActiveDiagnostics({
+      label,
+      diagnostics: subsystemDiagnostics,
+      top,
+      left,
+    });
+  };
+  const hideDiagnostics = () => setActiveDiagnostics(null);
   const renderHealthRow = (label, subsystem, className = "health-row") => {
     const health = getSubsystemHealth(subsystem);
     const healthPercent = health * 100;
+    const subsystemDiagnostics = getSubsystemDiagnostics(subsystem);
 
     return (
-      <div className={className} key={label} style={healthColorStyle(health)}>
+      <div
+        className={className}
+        key={label}
+        style={healthColorStyle(health)}
+        tabIndex={0}
+        onMouseEnter={(event) => showDiagnostics(event, label, subsystemDiagnostics)}
+        onMouseMove={(event) => showDiagnostics(event, label, subsystemDiagnostics)}
+        onMouseLeave={hideDiagnostics}
+        onFocus={(event) => showDiagnostics(event, label, subsystemDiagnostics)}
+        onBlur={hideDiagnostics}
+      >
         <div className="health-row__top">
           <span>{label}</span>
           <strong>{formatHealthPercent(health)}</strong>
@@ -1026,10 +1145,21 @@ function VehicleHealthPanel({ snapshot }) {
   const renderHealthChild = (label, subsystem) => {
     const health = getSubsystemHealth(subsystem);
     const healthPercent = health * 100;
+    const subsystemDiagnostics = getSubsystemDiagnostics(subsystem);
 
     return (
-      <div className="health-child-row" key={label} style={healthColorStyle(health)}>
-        <span className="health-child-row__label" title={label}>{label}</span>
+      <div
+        className="health-child-row"
+        key={label}
+        style={healthColorStyle(health)}
+        tabIndex={0}
+        onMouseEnter={(event) => showDiagnostics(event, label, subsystemDiagnostics)}
+        onMouseMove={(event) => showDiagnostics(event, label, subsystemDiagnostics)}
+        onMouseLeave={hideDiagnostics}
+        onFocus={(event) => showDiagnostics(event, label, subsystemDiagnostics)}
+        onBlur={hideDiagnostics}
+      >
+        <span className="health-child-row__label">{label}</span>
         <div className="health-child-row__meter" aria-hidden="true">
           <span style={{ "--health": `${healthPercent}%` }} />
         </div>
@@ -1041,37 +1171,57 @@ function VehicleHealthPanel({ snapshot }) {
   const overallHealth = clampHealthUnit(snapshot?.vehicle_health ?? 1);
 
   return (
-    <aside className="health-panel" aria-label="Vehicle health">
-      <div className="health-panel__overall" style={healthColorStyle(overallHealth)}>
-        <div className="health-panel__overall-top">
-          <span>Overall Vehicle Health</span>
-          <strong>{formatHealthPercent(overallHealth)}</strong>
-        </div>
-        <div className="health-panel__overall-meter" aria-hidden="true">
-          <span style={{ "--health": `${overallHealth * 100}%` }} />
-        </div>
-      </div>
-
-      <div className="health-panel__list">
-        {VEHICLE_HEALTH_GROUPS.map((group) => (
-          <div className="health-group" key={group.label}>
-            {renderHealthRow(group.label, group.subsystem, "health-row health-row--parent")}
-            {group.children && (
-              <div className="health-group__children">
-                {group.children.map((system) =>
-                  renderHealthChild(system, group.subsystem),
-                )}
-              </div>
-            )}
+    <>
+      <aside className="health-panel" aria-label="Vehicle health">
+        <div className="health-panel__overall" style={healthColorStyle(overallHealth)}>
+          <div className="health-panel__overall-top">
+            <span>Overall Vehicle Health</span>
+            <strong>{formatHealthPercent(overallHealth)}</strong>
           </div>
-        ))}
-      </div>
-    </aside>
+          <div className="health-panel__overall-meter" aria-hidden="true">
+            <span style={{ "--health": `${overallHealth * 100}%` }} />
+          </div>
+        </div>
+
+        <div className="health-panel__list" onScroll={hideDiagnostics}>
+          {VEHICLE_HEALTH_GROUPS.map((group) => (
+            <div className="health-group" key={group.label}>
+              {renderHealthRow(group.label, group.subsystem, "health-row health-row--parent")}
+              {group.children && (
+                <div className="health-group__children">
+                  {group.children.map((system) =>
+                    renderHealthChild(system, group.subsystem),
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </aside>
+      {activeDiagnostics && typeof document !== "undefined" && createPortal(
+        <div
+          className="health-diagnostics-popover"
+          style={{
+            "--diagnostics-left": `${activeDiagnostics.left}px`,
+            "--diagnostics-top": `${activeDiagnostics.top}px`,
+          }}
+        >
+          <div className="health-diagnostics-popover__label">
+            {activeDiagnostics.label}
+          </div>
+          <DiagnosticsHoverCard diagnostics={activeDiagnostics.diagnostics} />
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 
-function SimulationCalendarPanel({ currentDay, durationDays, runDurationMs, startDate }) {
+function SimulationCalendarPanel({ currentDay, durationDays, startDate }) {
   const dayOffset = Math.max(0, Math.min(durationDays, Math.round(currentDay)));
+  const timelineProgress = durationDays > 0
+    ? Math.max(0, Math.min(1, currentDay / durationDays))
+    : 0;
   const activeDate = useMemo(
     () => addCalendarDays(startDate, dayOffset),
     [dayOffset, startDate],
@@ -1122,7 +1272,7 @@ function SimulationCalendarPanel({ currentDay, durationDays, runDurationMs, star
 
       <div
         className="simulation-calendar__timeline"
-        style={{ "--timeline-duration": `${runDurationMs}ms` }}
+        style={{ "--timeline-progress": timelineProgress }}
         aria-label="Simulation timeline"
       >
         <div
@@ -1162,14 +1312,17 @@ export function TheaterWorkbench() {
   const [vehicleId, setVehicleId] = useState("ugv");
   const [runToken, setRunToken] = useState(0);
   const [isSimulationActive, setIsSimulationActive] = useState(false);
+  const [isSimulationPaused, setIsSimulationPaused] = useState(false);
   const [currentDay, setCurrentDay] = useState(0);
   const [vehicleHealthSnapshot, setVehicleHealthSnapshot] = useState(DEFAULT_HEALTH_SNAPSHOT);
+  const [vehicleDiagnostics, setVehicleDiagnostics] = useState(DEFAULT_DIAGNOSTICS);
   const [simulationReport, setSimulationReport] = useState(null);
   const [simulationStartDate, setSimulationStartDate] = useState(() => (
     startOfCalendarDay(new Date())
   ));
   const physicsEngineRef = useRef(null);
   const simulationInputsRef = useRef(null);
+  const isSimulationPausedRef = useRef(false);
   const reportHistoryRef = useRef([]);
   const lastReportSampleDayRef = useRef(0);
   const theaterIdForSim = theater && theater.id !== "custom" ? theater.id : "arctic";
@@ -1180,13 +1333,20 @@ export function TheaterWorkbench() {
   useEffect(() => {
     setEnvironmentParams(buildEnvironmentDefaults(theaterIdForSim));
     setIsSimulationActive(false);
+    setIsSimulationPaused(false);
+    isSimulationPausedRef.current = false;
     setCurrentDay(0);
     setVehicleHealthSnapshot(DEFAULT_HEALTH_SNAPSHOT);
+    setVehicleDiagnostics(DEFAULT_DIAGNOSTICS);
     setSimulationReport(null);
     setSimulationStartDate(startOfCalendarDay(new Date()));
     reportHistoryRef.current = [];
     lastReportSampleDayRef.current = 0;
   }, [theaterIdForSim]);
+
+  useEffect(() => {
+    isSimulationPausedRef.current = isSimulationPaused;
+  }, [isSimulationPaused]);
 
   useEffect(() => {
     let disposed = false;
@@ -1197,6 +1357,7 @@ export function TheaterWorkbench() {
         const engine = physicsEngineRef.current ?? new PhysicsEngine();
         physicsEngineRef.current = engine;
         setVehicleHealthSnapshot(parsePhysicsSnapshot(engine.get_vehicle()));
+        setVehicleDiagnostics(parsePhysicsDiagnostics(engine.get_diagnostics?.()));
       })
       .catch((error) => {
         console.error("Unable to initialize physics engine", error);
@@ -1235,7 +1396,8 @@ export function TheaterWorkbench() {
   useEffect(() => {
     if (!isSimulationActive) return undefined;
 
-    const startedAt = performance.now();
+    let elapsedMs = 0;
+    let lastFrameAt = performance.now();
     let lastPhysicsDay = 0;
     let latestSnapshotForRun =
       reportHistoryRef.current[reportHistoryRef.current.length - 1]?.snapshot ??
@@ -1264,14 +1426,23 @@ export function TheaterWorkbench() {
     };
 
     const tick = (now) => {
-      const progress = Math.min(1, (now - startedAt) / simulationRunDurationMs);
+      const frameDeltaMs = Math.max(0, now - lastFrameAt);
+      lastFrameAt = now;
+
+      if (isSimulationPausedRef.current) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+
+      elapsedMs += frameDeltaMs;
+      const progress = Math.min(1, elapsedMs / simulationRunDurationMs);
       const simulatedDay = simulationDurationDays * progress;
       const targetPhysicsDay = progress >= 1
         ? simulationDurationDays
         : Math.floor(simulatedDay);
       let didUpdatePhysics = false;
 
-      setCurrentDay(Math.round(simulatedDay));
+      setCurrentDay(simulatedDay);
 
       const physicsEngine = physicsEngineRef.current;
       if (physicsEngine && targetPhysicsDay > lastPhysicsDay) {
@@ -1303,6 +1474,7 @@ export function TheaterWorkbench() {
 
       if (didUpdatePhysics) {
         setVehicleHealthSnapshot(latestSnapshotForRun);
+        setVehicleDiagnostics(parsePhysicsDiagnostics(physicsEngine.get_diagnostics?.()));
       }
 
       if (progress >= 1) {
@@ -1322,6 +1494,8 @@ export function TheaterWorkbench() {
           series: finalSeries,
         });
         setIsSimulationActive(false);
+        setIsSimulationPaused(false);
+        isSimulationPausedRef.current = false;
         return;
       }
 
@@ -1399,7 +1573,10 @@ export function TheaterWorkbench() {
     setEnvironmentParams(normalizedParams);
     setCurrentDay(0);
     setVehicleHealthSnapshot(DEFAULT_HEALTH_SNAPSHOT);
+    setVehicleDiagnostics(DEFAULT_DIAGNOSTICS);
     setSimulationReport(null);
+    setIsSimulationPaused(false);
+    isSimulationPausedRef.current = false;
     setSimulationStartDate(startOfCalendarDay(new Date()));
 
     try {
@@ -1414,6 +1591,7 @@ export function TheaterWorkbench() {
       const initialSnapshot = parsePhysicsSnapshot(physicsEngine.get_vehicle());
       reportHistoryRef.current = [{ day: 0, snapshot: initialSnapshot }];
       setVehicleHealthSnapshot(initialSnapshot);
+      setVehicleDiagnostics(parsePhysicsDiagnostics(physicsEngine.get_diagnostics?.()));
     } catch (error) {
       console.error("Unable to start physics engine run", error);
     }
@@ -1421,10 +1599,32 @@ export function TheaterWorkbench() {
     setIsSimulationActive(true);
     setRunToken((token) => token + 1);
   };
-  const selectVehicleUnit = (nextVehicleId) => {
-    setVehicleId(nextVehicleId);
+  const toggleSimulationPause = () => {
+    setIsSimulationPaused((current) => {
+      const nextPaused = !current;
+      isSimulationPausedRef.current = nextPaused;
+      return nextPaused;
+    });
+  };
+  const stopSimulation = () => {
+    setIsSimulationActive(false);
+    setIsSimulationPaused(false);
+    isSimulationPausedRef.current = false;
     setCurrentDay(0);
     setVehicleHealthSnapshot(DEFAULT_HEALTH_SNAPSHOT);
+    setVehicleDiagnostics(DEFAULT_DIAGNOSTICS);
+    setSimulationReport(null);
+    setSimulationStartDate(startOfCalendarDay(new Date()));
+    reportHistoryRef.current = [];
+    lastReportSampleDayRef.current = 0;
+  };
+  const selectVehicleUnit = (nextVehicleId) => {
+    setVehicleId(nextVehicleId);
+    setIsSimulationPaused(false);
+    isSimulationPausedRef.current = false;
+    setCurrentDay(0);
+    setVehicleHealthSnapshot(DEFAULT_HEALTH_SNAPSHOT);
+    setVehicleDiagnostics(DEFAULT_DIAGNOSTICS);
     setSimulationReport(null);
     setSimulationStartDate(startOfCalendarDay(new Date()));
     reportHistoryRef.current = [];
@@ -1466,7 +1666,7 @@ export function TheaterWorkbench() {
           theaterId={theaterIdForSim}
           vehicleId={vehicleId}
           runToken={runToken}
-          simulationActive={isSimulationActive}
+          simulationActive={isSimulationActive && !isSimulationPaused}
         />
       </div>
 
@@ -1493,6 +1693,25 @@ export function TheaterWorkbench() {
             onClick={runSimulation}
           >
             <span>Run Simulation</span>
+          </button>
+        </div>
+      )}
+
+      {isSimulationActive && (
+        <div className="run-sim-dock run-sim-dock--controls">
+          <button
+            type="button"
+            className="run-sim-button run-sim-button--pause"
+            onClick={toggleSimulationPause}
+          >
+            <span>{isSimulationPaused ? "Resume" : "Pause"}</span>
+          </button>
+          <button
+            type="button"
+            className="run-sim-button run-sim-button--stop"
+            onClick={stopSimulation}
+          >
+            <span>Stop</span>
           </button>
         </div>
       )}
@@ -1638,14 +1857,16 @@ export function TheaterWorkbench() {
       )}
 
       {isSimulationActive && (
-        <VehicleHealthPanel snapshot={vehicleHealthSnapshot} />
+        <VehicleHealthPanel
+          snapshot={vehicleHealthSnapshot}
+          diagnostics={vehicleDiagnostics}
+        />
       )}
 
       {isSimulationActive && (
         <SimulationCalendarPanel
           currentDay={currentDay}
           durationDays={simulationDurationDays}
-          runDurationMs={simulationRunDurationMs}
           startDate={simulationStartDate}
         />
       )}
