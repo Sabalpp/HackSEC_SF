@@ -40,6 +40,7 @@ const CAMERA_COLLISION = Object.freeze({
   targetGroundClearanceMeters: 8,
   targetEdgePaddingMeters: 18,
 });
+const ROCK_SAND_REVEAL_METERS = 0.12;
 
 const MATERIALS = {
   rock: new THREE.MeshStandardMaterial({
@@ -616,13 +617,14 @@ function addRockOutcrops(scene) {
       continue;
     }
 
-    const y = renderHeightMetersAt(candidate.x, candidate.z);
     const longAxis = randomRange(random, 1.6, 4.9);
-    const heightAxis = randomRange(random, 0.035, 0.095);
+    const heightAxis = randomRange(random, 0.12, 0.24);
     const depthAxis = randomRange(random, 0.8, 2.2);
+    const yaw = randomRange(random, 0, Math.PI * 2);
+    const y = rockFootprintHeightMetersAt(candidate.x, candidate.z, yaw, longAxis, depthAxis);
 
-    dummy.position.set(candidate.x, y + heightAxis / 2 + 0.035, candidate.z);
-    dummy.rotation.set(randomRange(random, -0.012, 0.012), randomRange(random, 0, Math.PI * 2), randomRange(random, -0.012, 0.012));
+    dummy.position.set(candidate.x, y + heightAxis / 2 + ROCK_SAND_REVEAL_METERS, candidate.z);
+    dummy.rotation.set(randomRange(random, -0.006, 0.006), yaw, randomRange(random, -0.006, 0.006));
     dummy.scale.set(longAxis, heightAxis, depthAxis);
     dummy.updateMatrix();
     matrices.push(dummy.matrix.clone());
@@ -635,6 +637,34 @@ function addRockOutcrops(scene) {
   rocks.receiveShadow = true;
   matrices.forEach((matrix, index) => rocks.setMatrixAt(index, matrix));
   scene.add(rocks);
+}
+
+function rockFootprintHeightMetersAt(x, z, yaw, radiusX, radiusZ) {
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const samples = [
+    [0, 0],
+    [-0.85, 0],
+    [0.85, 0],
+    [0, -0.85],
+    [0, 0.85],
+    [-0.6, -0.6],
+    [0.6, -0.6],
+    [-0.6, 0.6],
+    [0.6, 0.6],
+  ];
+
+  let height = Number.NEGATIVE_INFINITY;
+
+  for (const [localX, localZ] of samples) {
+    const offsetX = localX * radiusX;
+    const offsetZ = localZ * radiusZ;
+    const worldX = x + offsetX * cos - offsetZ * sin;
+    const worldZ = z + offsetX * sin + offsetZ * cos;
+    height = Math.max(height, renderHeightMetersAt(worldX, worldZ));
+  }
+
+  return height;
 }
 
 function addSparseDesertShrubs(scene) {
