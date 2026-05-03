@@ -28,6 +28,7 @@ const ENVIRONMENT_DEFAULTS_BY_THEATER = {
     salinityPct: 0.5,
     uvWm2: 150,
     durationDays: "90",
+    dayStepDaysPerSecond: "6",
     material: "MildSteelColdWeather",
   },
   hormuz: {
@@ -37,6 +38,7 @@ const ENVIRONMENT_DEFAULTS_BY_THEATER = {
     salinityPct: 2,
     uvWm2: 900,
     durationDays: "90",
+    dayStepDaysPerSecond: "6",
     material: "MildSteelTemperate",
   },
   taiwan: {
@@ -46,6 +48,7 @@ const ENVIRONMENT_DEFAULTS_BY_THEATER = {
     salinityPct: 3.5,
     uvWm2: 600,
     durationDays: "90",
+    dayStepDaysPerSecond: "6",
     material: "Aluminum5083",
   },
 };
@@ -59,13 +62,27 @@ const parseDurationDays = (value) => {
   return Number.isFinite(parsed) ? Math.max(1, parsed) : 1;
 };
 
-const SIMULATION_RUN_DURATION_MS = 15000;
+const TARGET_SIMULATION_RUN_DURATION_SECONDS = 15;
+const DEFAULT_DAY_STEP_DAYS_PER_SECOND = 6;
+const MIN_DAY_STEP_DAYS_PER_SECOND = 0.1;
 const PHYSICS_DEGRADATION_SCALE = 0.1;
+const BROKEN_HEALTH_THRESHOLD = 0.001;
 const REPORT_MAX_POINTS = 120;
 const REPORT_CHART_WIDTH = 180;
 const REPORT_CHART_HEIGHT = 48;
 const PDF_PAGE_WIDTH = 612;
 const PDF_PAGE_HEIGHT = 792;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const CALENDAR_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const CALENDAR_MONTH_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  month: "long",
+  year: "numeric",
+});
+const CALENDAR_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
 
 let physicsEngineInitPromise = null;
 
@@ -146,6 +163,79 @@ const toHealthItemId = (label) => (
   label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")
 );
 
+const sanitizePositiveDecimalInput = (value) => {
+  const cleaned = value.replace(/[^\d.]/g, "");
+  const [whole = "", ...decimalParts] = cleaned.split(".");
+  return decimalParts.length > 0 ? `${whole}.${decimalParts.join("")}` : whole;
+};
+
+const parseDayStepDaysPerSecond = (value) => {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed)
+    ? Math.max(MIN_DAY_STEP_DAYS_PER_SECOND, parsed)
+    : DEFAULT_DAY_STEP_DAYS_PER_SECOND;
+};
+
+const formatDayStepDaysPerSecond = (value) => (
+  String(Math.max(1, Math.round(value)))
+);
+
+const dayStepForTargetRunDuration = (durationDays) => (
+  formatDayStepDaysPerSecond(durationDays / TARGET_SIMULATION_RUN_DURATION_SECONDS)
+);
+
+const estimatedRunDurationMs = (durationDays, dayStepDaysPerSecond) => (
+  (durationDays / Math.max(MIN_DAY_STEP_DAYS_PER_SECOND, dayStepDaysPerSecond)) * 1000
+);
+
+const formatEstimatedRunDuration = (durationMs) => {
+  const totalSeconds = durationMs / 1000;
+  if (totalSeconds < 60) {
+    const rounded = totalSeconds < 10 ? totalSeconds.toFixed(1) : totalSeconds.toFixed(0);
+    return `${rounded} sec`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.round(totalSeconds % 60);
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+};
+
+const startOfCalendarDay = (date) => (
+  new Date(date.getFullYear(), date.getMonth(), date.getDate())
+);
+
+const calendarDateKey = (date) => Date.UTC(
+  date.getFullYear(),
+  date.getMonth(),
+  date.getDate(),
+);
+
+const addCalendarDays = (date, dayCount) => (
+  new Date(date.getFullYear(), date.getMonth(), date.getDate() + dayCount)
+);
+
+const daysBetweenCalendarDates = (startDate, endDate) => (
+  Math.round((calendarDateKey(endDate) - calendarDateKey(startDate)) / DAY_MS)
+);
+
+const buildCalendarMonth = (viewDate, startDate, durationDays) => {
+  const monthStart = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1);
+  const firstWeekday = monthStart.getDay();
+  const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
+  const cellCount = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
+
+  return Array.from({ length: cellCount }, (_, index) => {
+    const date = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1 - firstWeekday + index);
+    const dayOffset = daysBetweenCalendarDates(startDate, date);
+    return {
+      key: calendarDateKey(date),
+      date,
+      inMonth: date.getMonth() === viewDate.getMonth(),
+      inSimulationRange: dayOffset >= 0 && dayOffset <= durationDays,
+    };
+  });
+};
+
 const REPORT_HEALTH_ITEMS = [
   { id: "overall", label: "Overall Vehicle Health", overall: true },
   ...VEHICLE_HEALTH_GROUPS.flatMap((group) => [
@@ -193,16 +283,79 @@ const REPORT_HEALTH_SECTIONS = [
   },
 ];
 
+const FAILURE_IMPORTANCE_BY_SUBSYSTEM = {
+  engine: { rank: 4, label: "Very high" },
+  battery: { rank: 3, label: "High" },
+  hydraulics: { rank: 3, label: "High" },
+  chassis: { rank: 2, label: "Medium" },
+  sensors: { rank: 1, label: "Low" },
+};
+
+const REPORT_FAILURE_ITEMS = REPORT_HEALTH_ITEMS.filter((item) => !item.overall);
+
+const reasonNumber = (value, digits = 0) => {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) return "0";
+  return digits > 0 ? parsed.toFixed(digits) : String(Math.round(parsed));
+};
+
+const ENVIRONMENT_FAILURE_FACTORS = [
+  {
+    id: "extremeHeat",
+    label: "Extreme heat",
+    isActive: (inputs) => Number(inputs?.temperatureF) >= 100,
+    describe: (inputs) => `Extreme heat (${reasonNumber(inputs?.temperatureF)}°F)`,
+  },
+  {
+    id: "extremeCold",
+    label: "Extreme cold",
+    isActive: (inputs) => Number(inputs?.temperatureF) <= 32,
+    describe: (inputs) => `Extreme cold (${reasonNumber(inputs?.temperatureF)}°F)`,
+  },
+  {
+    id: "dustIngestion",
+    label: "Dust ingestion",
+    isActive: (inputs) => Number(inputs?.dustMgM3) >= 4,
+    describe: (inputs) => `Dust ingestion (${reasonNumber(inputs?.dustMgM3, 1)} mg/m³)`,
+  },
+  {
+    id: "humidity",
+    label: "Humidity",
+    isActive: (inputs) => Number(inputs?.relativeHumidityPct) >= 70,
+    describe: (inputs) => `Humidity (${reasonNumber(inputs?.relativeHumidityPct)}%)`,
+  },
+  {
+    id: "salinity",
+    label: "Salinity",
+    isActive: (inputs) => Number(inputs?.salinityPct) >= 0.5,
+    describe: (inputs) => `Salinity (${reasonNumber(inputs?.salinityPct, 1)}%)`,
+  },
+  {
+    id: "uvSolarRadiation",
+    label: "UV / solar radiation",
+    isActive: (inputs) => Number(inputs?.uvWm2) >= 500,
+    describe: (inputs) => `UV / solar radiation (${reasonNumber(inputs?.uvWm2)} W/m²)`,
+  },
+];
+
+const FAILURE_FACTOR_IDS_BY_SUBSYSTEM = {
+  engine: ["extremeHeat", "extremeCold", "dustIngestion"],
+  battery: ["extremeHeat", "extremeCold", "uvSolarRadiation"],
+  hydraulics: ["extremeHeat", "extremeCold", "uvSolarRadiation"],
+  sensors: ["dustIngestion", "humidity", "uvSolarRadiation"],
+  chassis: ["extremeCold", "humidity", "salinity"],
+};
+
 const ENVIRONMENT_FIELDS = [
   {
     id: "temperatureF",
     symbol: "T(t)",
     label: "Temperature",
-    min: -40,
-    max: 140,
+    min: -80,
+    max: 170,
     step: 1,
-    minLabel: "Arctic -40°F",
-    maxLabel: "Desert 140°F",
+    minLabel: "Extreme -80°F",
+    maxLabel: "Extreme 170°F",
     accent: "#60a5fa",
     accentRgb: "96,165,250",
     format: (value) => `${value}°F`,
@@ -397,7 +550,47 @@ const healthValueForItem = (snapshot, item) => {
   return clampHealthUnit(snapshot?.subsystems?.[item.subsystem] ?? snapshot?.vehicle_health ?? 1);
 };
 
-const buildTrendPoints = (series, item) => {
+const failedDayForItem = (series, item) => {
+  const breakPoint = series.find((point) => (
+    healthValueForItem(point.snapshot, item) <= BROKEN_HEALTH_THRESHOLD
+  ));
+  return breakPoint ? Math.max(0, Math.ceil(breakPoint.day)) : null;
+};
+
+const importanceForItem = (item) => (
+  FAILURE_IMPORTANCE_BY_SUBSYSTEM[item.subsystem] ?? { rank: 1, label: "Low" }
+);
+
+const failureReasonForItem = (item, inputs, durationDays) => {
+  const factorIds = FAILURE_FACTOR_IDS_BY_SUBSYSTEM[item.subsystem] ?? [];
+  const matchedFactors = ENVIRONMENT_FAILURE_FACTORS.filter((factor) => (
+    factorIds.includes(factor.id) && factor.isActive(inputs ?? {})
+  ));
+
+  if (matchedFactors.length) {
+    return matchedFactors.map((factor) => factor.describe(inputs ?? {})).join("; ");
+  }
+
+  return `Cumulative exposure over ${durationDays} days`;
+};
+
+const buildFailureSummary = (series, inputs = {}, durationDays = 0) => (
+  REPORT_FAILURE_ITEMS
+    .map((item) => ({
+      ...item,
+      failedDay: failedDayForItem(series, item),
+      importance: importanceForItem(item),
+      reason: failureReasonForItem(item, inputs, durationDays),
+    }))
+    .filter((item) => item.failedDay !== null)
+    .sort((a, b) => (
+      b.importance.rank - a.importance.rank ||
+      a.failedDay - b.failedDay ||
+      a.label.localeCompare(b.label)
+    ))
+);
+
+const buildTrendPoints = (series, item, yOffset = 0) => {
   if (!series.length) return "";
   const minDay = series[0].day;
   const maxDay = series[series.length - 1].day;
@@ -406,7 +599,7 @@ const buildTrendPoints = (series, item) => {
   return series
     .map((point, index) => {
       const x = ((point.day - minDay) / daySpan) * REPORT_CHART_WIDTH;
-      const y = (1 - healthValueForItem(point.snapshot, item)) * REPORT_CHART_HEIGHT;
+      const y = (1 - healthValueForItem(point.snapshot, item)) * REPORT_CHART_HEIGHT + yOffset;
       return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
     })
     .join(" ");
@@ -419,7 +612,7 @@ const buildReportPdf = (report) => {
   const margin = 36;
   const columnGap = 18;
   const columnWidth = (PDF_PAGE_WIDTH - margin * 2 - columnGap) / 2;
-  const cardHeight = 42;
+  const cardHeight = 38;
   const cardGap = 5;
   const chartHeight = 13;
   const componentItems = REPORT_HEALTH_ITEMS.filter((item) => !item.overall);
@@ -431,6 +624,7 @@ const buildReportPdf = (report) => {
   const averageFinalHealth =
     componentItems.reduce((sum, item) => sum + healthValueForItem(finalSnapshot, item), 0) /
     Math.max(1, componentItems.length);
+  const failures = buildFailureSummary(report.series, report.inputs, report.durationDays);
 
   const setFill = (rgb) => content.push(`${rgb} rg`);
   const setStroke = (rgb) => content.push(`${rgb} RG`);
@@ -460,9 +654,8 @@ const buildReportPdf = (report) => {
   };
   const drawPdfComponentCard = (item, x, yTop, width, isChild = false) => {
     const y = yTop - cardHeight;
-    const startHealth = healthValueForItem(report.series[0]?.snapshot, item);
     const endHealth = healthValueForItem(finalSnapshot, item);
-    const loss = Math.max(0, startHealth - endHealth);
+    const failedDay = failedDayForItem(report.series, item);
     const healthRgb = pdfRgbForHealth(endHealth);
     const chartX = x + 96;
     const chartY = y + 17;
@@ -474,9 +667,6 @@ const buildReportPdf = (report) => {
     filledAndStrokedRect(x, y, width, cardHeight, "1.00 1.00 1.00", item.parent || item.overall ? healthRgb : "0.80 0.86 0.93");
     filledRect(x, y, 4, cardHeight, healthRgb);
     text(truncatePdfText(item.label, isChild ? 17 : 20), x + 12, y + 31, 8.4, "0.09 0.13 0.20");
-    if (item.parentLabel) {
-      text(truncatePdfText(item.parentLabel, 15), x + 12, y + 22, 6.2, "0.34 0.45 0.60");
-    }
     text(formatHealthPercent(endHealth), x + 12, y + 12, 10, healthRgb);
     progressBar(x + 48, y + 8, 34, 4, endHealth, healthRgb);
 
@@ -489,9 +679,19 @@ const buildReportPdf = (report) => {
       const pointY = chartY + health * chartHeight;
       return `${pdfNumber(pointX)} ${pdfNumber(pointY)} ${pointIndex === 0 ? "m" : "l"}`;
     }).join(" ");
+    const shadowPath = report.series.map((point, pointIndex) => {
+      const health = healthValueForItem(point.snapshot, item);
+      const pointX = chartX + ((point.day - minDay) / daySpan) * chartWidth;
+      const pointY = chartY + health * chartHeight - 1.6;
+      return `${pdfNumber(pointX)} ${pdfNumber(pointY)} ${pointIndex === 0 ? "m" : "l"}`;
+    }).join(" ");
+    setStroke("0.08 0.12 0.18");
+    content.push(`3.1 w ${shadowPath} S`);
     setStroke(healthRgb);
     content.push(`1.35 w ${path} S`);
-    text(`-${Math.round(loss * 100)} pts`, chartX, y + 6, 6.2, "0.38 0.45 0.56");
+    if (failedDay !== null) {
+      text(`Failed day ${failedDay}`, chartX, y + 6, 6.2, "0.78 0.18 0.18");
+    }
 
     return y - cardGap;
   };
@@ -518,8 +718,7 @@ const buildReportPdf = (report) => {
   filledRect(0, 696, PDF_PAGE_WIDTH, 96, "0.05 0.09 0.16");
   filledRect(0, 696, PDF_PAGE_WIDTH, 5, pdfRgbForHealth(finalHealth));
   text("LANDFORGE", margin, 762, 10, "0.58 0.76 0.96");
-  text("Simulation Report", margin, 738, 24, "0.96 0.98 1.00");
-  text(truncatePdfText(report.theaterLabel, 38), margin, 718, 12, "0.75 0.84 0.94");
+  text("Contingency Report", margin, 732, 24, "0.96 0.98 1.00");
 
   filledAndStrokedRect(428, 718, 148, 48, "0.09 0.14 0.23", "0.23 0.33 0.48");
   text("OVERALL HEALTH", 442, 749, 7.5, "0.62 0.72 0.84");
@@ -557,14 +756,40 @@ const buildReportPdf = (report) => {
     text(value, x + 10, summaryY + 8, 9.5, accentRgb);
   });
 
-  text("Component Health Trends", margin, 568, 12, "0.08 0.13 0.22");
-  text("Green is healthy; red indicates severe degradation.", margin, 554, 8, "0.42 0.50 0.62");
+  const failureSummaryY = 536;
+  filledAndStrokedRect(margin, failureSummaryY, PDF_PAGE_WIDTH - margin * 2, 48, "1.00 1.00 1.00", "0.82 0.88 0.95");
+  text("FAILURE SUMMARY", margin + 10, failureSummaryY + 35, 7.2, "0.20 0.39 0.72");
+  if (!failures.length) {
+    text("No component failures recorded.", margin + 10, failureSummaryY + 18, 8, "0.42 0.50 0.62");
+  } else {
+    const visibleFailures = failures.slice(0, 8);
+    const summaryColumnWidth = (PDF_PAGE_WIDTH - margin * 2 - 28) / 2;
+    visibleFailures.forEach((failure, index) => {
+      const columnIndex = Math.floor(index / 4);
+      const rowIndex = index % 4;
+      const x = margin + 10 + columnIndex * summaryColumnWidth;
+      const y = failureSummaryY + 25 - rowIndex * 8;
+      text(
+        `${truncatePdfText(failure.label, 12)}  Day ${failure.failedDay}  ${failure.importance.label} - ${truncatePdfText(failure.reason, 26)}`,
+        x,
+        y,
+        5.3,
+        failure.importance.rank >= 4 ? "0.78 0.18 0.18" : "0.24 0.34 0.48",
+      );
+    });
+    if (failures.length > visibleFailures.length) {
+      text(`+${failures.length - visibleFailures.length} more`, margin + PDF_PAGE_WIDTH - margin * 2 - 22, failureSummaryY + 5, 5.8, "0.42 0.50 0.62");
+    }
+  }
+
+  text("Component Health Trends", margin, 508, 12, "0.08 0.13 0.22");
+  text("Each card shows the first simulated day the part failed.", margin, 494, 8, "0.42 0.50 0.62");
 
   const chassisSection = REPORT_HEALTH_SECTIONS.find((section) => section.id === "chassis");
   const sensorsSection = REPORT_HEALTH_SECTIONS.find((section) => section.id === "sensors");
   const powerSection = REPORT_HEALTH_SECTIONS.find((section) => section.id === "power-actuation");
-  drawPdfSection(chassisSection, margin, 536, columnWidth);
-  const sensorsBottom = drawPdfSection(sensorsSection, margin + columnWidth + columnGap, 536, columnWidth);
+  drawPdfSection(chassisSection, margin, 476, columnWidth);
+  const sensorsBottom = drawPdfSection(sensorsSection, margin + columnWidth + columnGap, 476, columnWidth);
   drawPdfSection(powerSection, margin + columnWidth + columnGap, sensorsBottom - 14, columnWidth);
 
   const stream = content.join("\n");
@@ -605,10 +830,10 @@ const downloadReportPdf = (report) => {
 };
 
 function ComponentTrendCard({ item, series }) {
-  const startHealth = healthValueForItem(series[0]?.snapshot, item);
   const endHealth = healthValueForItem(series[series.length - 1]?.snapshot, item);
-  const loss = Math.max(0, startHealth - endHealth);
+  const failedDay = failedDayForItem(series, item);
   const trendPath = buildTrendPoints(series, item);
+  const trendShadowPath = buildTrendPoints(series, item, 3.5);
 
   return (
     <div
@@ -620,7 +845,6 @@ function ComponentTrendCard({ item, series }) {
         <span>{item.label}</span>
         <strong>{formatHealthPercent(endHealth)}</strong>
       </div>
-      {item.parentLabel && <div className="report-card__group">{item.parentLabel}</div>}
       <svg
         className="report-card__chart"
         viewBox={`0 0 ${REPORT_CHART_WIDTH} ${REPORT_CHART_HEIGHT}`}
@@ -634,13 +858,56 @@ function ComponentTrendCard({ item, series }) {
           x2={REPORT_CHART_WIDTH}
           y2={REPORT_CHART_HEIGHT}
         />
-        <path d={trendPath} />
+        <path className="report-card__chart-shadow" d={trendShadowPath} />
+        <path className="report-card__chart-line" d={trendPath} />
       </svg>
-      <div className="report-card__delta">
-        <span>Start {formatHealthPercent(startHealth)}</span>
-        <span>-{Math.round(loss * 100)} pts</span>
-      </div>
+      {failedDay !== null && (
+        <div className="report-card__delta">
+          <span>Failure day</span>
+          <strong>Day {failedDay}</strong>
+        </div>
+      )}
     </div>
+  );
+}
+
+function FailureSummarySection({ failures }) {
+  return (
+    <section className="report-failure-summary" aria-label="Failure summary">
+      <div className="report-failure-summary__head">
+        <span>Failure Summary</span>
+        <strong>{failures.length ? `${failures.length} failed` : "No failures"}</strong>
+      </div>
+      {failures.length ? (
+        <div className="report-failure-summary__grid">
+          <div className="report-failure-summary__row report-failure-summary__row--head">
+            <span>Part</span>
+            <span>Failed</span>
+            <span>Importance</span>
+            <span>Reason</span>
+          </div>
+          {failures.map((failure) => (
+            <div className="report-failure-summary__row" key={failure.id}>
+              <span className="report-failure-summary__part">
+                <strong>{failure.label}</strong>
+              </span>
+              <span>Day {failure.failedDay}</span>
+              <strong
+                className="report-failure-summary__importance"
+                data-importance={failure.importance.label.toLowerCase().replace(/\s+/g, "-")}
+              >
+                {failure.importance.label}
+              </strong>
+              <span className="report-failure-summary__reason" title={failure.reason}>
+                {failure.reason}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p>No component failures recorded.</p>
+      )}
+    </section>
   );
 }
 
@@ -680,13 +947,13 @@ function ReportSection({ section, series }) {
 function SimulationReportPanel({ report, onClose }) {
   const finalSnapshot = report.series[report.series.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
   const finalHealth = clampHealthUnit(finalSnapshot.vehicle_health ?? 1);
+  const failures = buildFailureSummary(report.series, report.inputs, report.durationDays);
 
   return (
     <aside className="report-panel" aria-label="Simulation report">
       <div className="report-panel__head">
         <div className="report-panel__title-stack">
-          <div className="report-panel__eyebrow">Simulation Report</div>
-          <div className="report-panel__title">{report.theaterLabel}</div>
+          <div className="report-panel__title">Contingency Report</div>
         </div>
         <div className="report-panel__actions">
           <div className="report-panel__score" style={healthColorStyle(finalHealth)}>
@@ -725,6 +992,7 @@ function SimulationReportPanel({ report, onClose }) {
       </div>
 
       <div className="report-panel__sections">
+        <FailureSummarySection failures={failures} />
         <ComponentTrendCard item={REPORT_HEALTH_ITEMS[0]} series={report.series} />
         {REPORT_HEALTH_SECTIONS.map((section) => (
           <ReportSection key={section.id} section={section} series={report.series} />
@@ -734,7 +1002,7 @@ function SimulationReportPanel({ report, onClose }) {
   );
 }
 
-function VehicleHealthPanel({ snapshot, currentDay = 1 }) {
+function VehicleHealthPanel({ snapshot }) {
   const subsystems = snapshot?.subsystems ?? DEFAULT_HEALTH_SNAPSHOT.subsystems;
   const getSubsystemHealth = (subsystem) => (
     clampHealthUnit(subsystems[subsystem] ?? snapshot?.vehicle_health ?? 1)
@@ -779,11 +1047,6 @@ function VehicleHealthPanel({ snapshot, currentDay = 1 }) {
           <span>Overall Vehicle Health</span>
           <strong>{formatHealthPercent(overallHealth)}</strong>
         </div>
-        <div className="health-panel__chips" aria-label="Simulation status">
-          <span className="health-panel__chip">Running</span>
-          <span className="health-panel__chip">Day {Math.max(1, currentDay)}</span>
-          <span className="health-panel__chip">Env Baseline</span>
-        </div>
         <div className="health-panel__overall-meter" aria-hidden="true">
           <span style={{ "--health": `${overallHealth * 100}%` }} />
         </div>
@@ -802,6 +1065,79 @@ function VehicleHealthPanel({ snapshot, currentDay = 1 }) {
             )}
           </div>
         ))}
+      </div>
+    </aside>
+  );
+}
+
+function SimulationCalendarPanel({ currentDay, durationDays, runDurationMs, startDate }) {
+  const dayOffset = Math.max(0, Math.min(durationDays, Math.round(currentDay)));
+  const activeDate = useMemo(
+    () => addCalendarDays(startDate, dayOffset),
+    [dayOffset, startDate],
+  );
+  const calendarDays = useMemo(
+    () => buildCalendarMonth(activeDate, startDate, durationDays),
+    [activeDate, durationDays, startDate],
+  );
+  const activeDateKey = calendarDateKey(activeDate);
+
+  return (
+    <aside className="simulation-calendar-panel" aria-label="Simulation calendar">
+      <div className="simulation-calendar__head">
+        <div>
+          <span>Simulation Calendar</span>
+          <strong>{CALENDAR_MONTH_FORMATTER.format(activeDate)}</strong>
+        </div>
+        <div className="simulation-calendar__today">
+          <span>Day {dayOffset}</span>
+          <strong>{CALENDAR_DATE_FORMATTER.format(activeDate)}</strong>
+        </div>
+      </div>
+
+      <div className="simulation-calendar__weekdays" aria-hidden="true">
+        {CALENDAR_WEEKDAYS.map((dayName) => (
+          <span key={dayName}>{dayName}</span>
+        ))}
+      </div>
+
+      <div className="simulation-calendar__grid">
+        {calendarDays.map((day) => {
+          const isActive = day.key === activeDateKey;
+          return (
+            <div
+              className="simulation-calendar__day"
+              key={day.key}
+              data-active={isActive}
+              data-outside={!day.inMonth}
+              data-range={day.inSimulationRange}
+              aria-current={isActive ? "date" : undefined}
+              title={CALENDAR_DATE_FORMATTER.format(day.date)}
+            >
+              <span>{day.date.getDate()}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div
+        className="simulation-calendar__timeline"
+        style={{ "--timeline-duration": `${runDurationMs}ms` }}
+        aria-label="Simulation timeline"
+      >
+        <div
+          className="timeline-dock__progress"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax={durationDays}
+          aria-valuenow={dayOffset}
+        >
+          <div className="timeline-dock__fill" />
+        </div>
+        <div className="timeline-dock__scale">
+          <span>Day 0</span>
+          <span>Day {durationDays}</span>
+        </div>
       </div>
     </aside>
   );
@@ -826,13 +1162,16 @@ export function TheaterWorkbench() {
   const [vehicleId, setVehicleId] = useState("ugv");
   const [runToken, setRunToken] = useState(0);
   const [isSimulationActive, setIsSimulationActive] = useState(false);
-  const [currentDay, setCurrentDay] = useState(1);
+  const [currentDay, setCurrentDay] = useState(0);
   const [vehicleHealthSnapshot, setVehicleHealthSnapshot] = useState(DEFAULT_HEALTH_SNAPSHOT);
   const [simulationReport, setSimulationReport] = useState(null);
+  const [simulationStartDate, setSimulationStartDate] = useState(() => (
+    startOfCalendarDay(new Date())
+  ));
   const physicsEngineRef = useRef(null);
   const simulationInputsRef = useRef(null);
   const reportHistoryRef = useRef([]);
-  const lastReportSampleDayRef = useRef(1);
+  const lastReportSampleDayRef = useRef(0);
   const theaterIdForSim = theater && theater.id !== "custom" ? theater.id : "arctic";
   const [environmentParams, setEnvironmentParams] = useState(() =>
     buildEnvironmentDefaults(theaterIdForSim),
@@ -841,11 +1180,12 @@ export function TheaterWorkbench() {
   useEffect(() => {
     setEnvironmentParams(buildEnvironmentDefaults(theaterIdForSim));
     setIsSimulationActive(false);
-    setCurrentDay(1);
+    setCurrentDay(0);
     setVehicleHealthSnapshot(DEFAULT_HEALTH_SNAPSHOT);
     setSimulationReport(null);
+    setSimulationStartDate(startOfCalendarDay(new Date()));
     reportHistoryRef.current = [];
-    lastReportSampleDayRef.current = 1;
+    lastReportSampleDayRef.current = 0;
   }, [theaterIdForSim]);
 
   useEffect(() => {
@@ -883,12 +1223,23 @@ export function TheaterWorkbench() {
   }, [simulationReport]);
 
   const simulationDurationDays = parseDurationDays(environmentParams.durationDays);
+  const simulationDayStepDaysPerSecond = parseDayStepDaysPerSecond(
+    environmentParams.dayStepDaysPerSecond,
+  );
+  const simulationRunDurationMs = estimatedRunDurationMs(
+    simulationDurationDays,
+    simulationDayStepDaysPerSecond,
+  );
+  const simulationRunDurationLabel = formatEstimatedRunDuration(simulationRunDurationMs);
 
   useEffect(() => {
     if (!isSimulationActive) return undefined;
 
     const startedAt = performance.now();
-    let lastSimulatedDay = 0;
+    let lastPhysicsDay = 0;
+    let latestSnapshotForRun =
+      reportHistoryRef.current[reportHistoryRef.current.length - 1]?.snapshot ??
+      DEFAULT_HEALTH_SNAPSHOT;
     let raf = 0;
     const physicsEnvironment = buildPhysicsEnvironment(
       simulationInputsRef.current ?? environmentParams,
@@ -913,43 +1264,52 @@ export function TheaterWorkbench() {
     };
 
     const tick = (now) => {
-      const progress = Math.min(1, (now - startedAt) / SIMULATION_RUN_DURATION_MS);
+      const progress = Math.min(1, (now - startedAt) / simulationRunDurationMs);
       const simulatedDay = simulationDurationDays * progress;
-      const dayStep = Math.max(0, simulatedDay - lastSimulatedDay);
-      lastSimulatedDay = simulatedDay;
-      const reportDay = Math.max(1, 1 + (simulationDurationDays - 1) * progress);
-      let latestSnapshot = null;
+      const targetPhysicsDay = progress >= 1
+        ? simulationDurationDays
+        : Math.floor(simulatedDay);
+      let didUpdatePhysics = false;
 
-      setCurrentDay(Math.round(reportDay));
+      setCurrentDay(Math.round(simulatedDay));
 
       const physicsEngine = physicsEngineRef.current;
-      if (physicsEngine && dayStep > 0) {
+      if (physicsEngine && targetPhysicsDay > lastPhysicsDay) {
         try {
-          physicsEngine.set_time_step(dayStep * PHYSICS_DEGRADATION_SCALE);
-          latestSnapshot = parsePhysicsSnapshot(
-            physicsEngine.tick(
-              physicsEnvironment.temperatureC,
-              physicsEnvironment.particulateConcentration,
-              physicsEnvironment.relativeHumidity,
-              physicsEnvironment.salinityConcentration,
-              physicsEnvironment.irradiance,
-            ),
-          );
-          setVehicleHealthSnapshot(latestSnapshot);
+          while (lastPhysicsDay < targetPhysicsDay) {
+            const nextPhysicsDay = lastPhysicsDay + 1;
+            physicsEngine.set_time_step(PHYSICS_DEGRADATION_SCALE);
+            latestSnapshotForRun = parsePhysicsSnapshot(
+              physicsEngine.tick(
+                physicsEnvironment.temperatureC,
+                physicsEnvironment.particulateConcentration,
+                physicsEnvironment.relativeHumidity,
+                physicsEnvironment.salinityConcentration,
+                physicsEnvironment.irradiance,
+              ),
+            );
+            lastPhysicsDay = nextPhysicsDay;
+            didUpdatePhysics = true;
+            recordReportPoint(
+              lastPhysicsDay,
+              latestSnapshotForRun,
+              progress >= 1 && lastPhysicsDay >= simulationDurationDays,
+            );
+          }
         } catch (error) {
           console.error("Unable to tick physics engine", error);
         }
       }
 
-      const history = reportHistoryRef.current;
-      const reportSnapshot =
-        latestSnapshot ?? history[history.length - 1]?.snapshot ?? DEFAULT_HEALTH_SNAPSHOT;
-      recordReportPoint(reportDay, reportSnapshot, progress >= 1);
+      if (didUpdatePhysics) {
+        setVehicleHealthSnapshot(latestSnapshotForRun);
+      }
 
       if (progress >= 1) {
+        recordReportPoint(simulationDurationDays, latestSnapshotForRun, true);
         const finalSeries = reportHistoryRef.current.length > 0
           ? [...reportHistoryRef.current]
-          : [{ day: 1, snapshot: latestSnapshot ?? DEFAULT_HEALTH_SNAPSHOT }];
+          : [{ day: 0, snapshot: latestSnapshotForRun }];
         const runInputs = simulationInputsRef.current ?? environmentParams;
         const unitLabel = VEHICLE_UNIT_OPTIONS.find((unit) => unit.id === vehicleId)?.label ?? "Unit";
 
@@ -958,6 +1318,7 @@ export function TheaterWorkbench() {
           unitLabel,
           durationDays: simulationDurationDays,
           material: runInputs.material,
+          inputs: runInputs,
           series: finalSeries,
         });
         setIsSimulationActive(false);
@@ -969,7 +1330,7 @@ export function TheaterWorkbench() {
     raf = requestAnimationFrame(tick);
 
     return () => cancelAnimationFrame(raf);
-  }, [isSimulationActive, simulationDurationDays]);
+  }, [isSimulationActive, simulationDurationDays, simulationRunDurationMs]);
 
   const setEnvironmentField = (fieldId, value) => {
     setEnvironmentParams((current) => ({ ...current, [fieldId]: value }));
@@ -978,30 +1339,68 @@ export function TheaterWorkbench() {
     setEnvironmentParams(buildEnvironmentDefaults(theaterIdForSim));
   };
   const setDurationDays = (value) => {
-    setEnvironmentField("durationDays", value.replace(/\D/g, ""));
+    const durationValue = value.replace(/\D/g, "");
+    setEnvironmentParams((current) => {
+      if (!durationValue) {
+        return { ...current, durationDays: durationValue };
+      }
+      const durationDays = parseDurationDays(durationValue);
+      return {
+        ...current,
+        durationDays: durationValue,
+        dayStepDaysPerSecond: dayStepForTargetRunDuration(durationDays),
+      };
+    });
   };
   const normalizeDurationDays = () => {
     setEnvironmentParams((current) => {
-      return { ...current, durationDays: String(parseDurationDays(current.durationDays)) };
+      const durationDays = parseDurationDays(current.durationDays);
+      return {
+        ...current,
+        durationDays: String(durationDays),
+        dayStepDaysPerSecond: dayStepForTargetRunDuration(durationDays),
+      };
     });
   };
   const adjustDurationDays = (delta) => {
     setEnvironmentParams((current) => {
       const currentDays = parseDurationDays(current.durationDays);
-      return { ...current, durationDays: String(Math.max(1, currentDays + delta)) };
+      const durationDays = Math.max(1, currentDays + delta);
+      return {
+        ...current,
+        durationDays: String(durationDays),
+        dayStepDaysPerSecond: dayStepForTargetRunDuration(durationDays),
+      };
+    });
+  };
+  const setDayStepDaysPerSecond = (value) => {
+    setEnvironmentField("dayStepDaysPerSecond", sanitizePositiveDecimalInput(value));
+  };
+  const normalizeDayStepDaysPerSecond = () => {
+    setEnvironmentParams((current) => {
+      const parsed = parseDayStepDaysPerSecond(current.dayStepDaysPerSecond);
+      return { ...current, dayStepDaysPerSecond: formatDayStepDaysPerSecond(parsed) };
     });
   };
   const runSimulation = async () => {
     const durationDays = parseDurationDays(environmentParams.durationDays);
-    const normalizedParams = { ...environmentParams, durationDays: String(durationDays) };
+    const dayStepDaysPerSecond = parseDayStepDaysPerSecond(
+      environmentParams.dayStepDaysPerSecond,
+    );
+    const normalizedParams = {
+      ...environmentParams,
+      durationDays: String(durationDays),
+      dayStepDaysPerSecond: formatDayStepDaysPerSecond(dayStepDaysPerSecond),
+    };
     simulationInputsRef.current = normalizedParams;
-    reportHistoryRef.current = [{ day: 1, snapshot: DEFAULT_HEALTH_SNAPSHOT }];
-    lastReportSampleDayRef.current = 1;
+    reportHistoryRef.current = [{ day: 0, snapshot: DEFAULT_HEALTH_SNAPSHOT }];
+    lastReportSampleDayRef.current = 0;
 
     setEnvironmentParams(normalizedParams);
-    setCurrentDay(1);
+    setCurrentDay(0);
     setVehicleHealthSnapshot(DEFAULT_HEALTH_SNAPSHOT);
     setSimulationReport(null);
+    setSimulationStartDate(startOfCalendarDay(new Date()));
 
     try {
       await ensurePhysicsEngineRuntime();
@@ -1013,7 +1412,7 @@ export function TheaterWorkbench() {
         physicsEngine.reset();
       }
       const initialSnapshot = parsePhysicsSnapshot(physicsEngine.get_vehicle());
-      reportHistoryRef.current = [{ day: 1, snapshot: initialSnapshot }];
+      reportHistoryRef.current = [{ day: 0, snapshot: initialSnapshot }];
       setVehicleHealthSnapshot(initialSnapshot);
     } catch (error) {
       console.error("Unable to start physics engine run", error);
@@ -1024,11 +1423,12 @@ export function TheaterWorkbench() {
   };
   const selectVehicleUnit = (nextVehicleId) => {
     setVehicleId(nextVehicleId);
-    setCurrentDay(1);
+    setCurrentDay(0);
     setVehicleHealthSnapshot(DEFAULT_HEALTH_SNAPSHOT);
     setSimulationReport(null);
+    setSimulationStartDate(startOfCalendarDay(new Date()));
     reportHistoryRef.current = [];
-    lastReportSampleDayRef.current = 1;
+    lastReportSampleDayRef.current = 0;
     setIsSimulationActive(false);
   };
 
@@ -1098,91 +1498,134 @@ export function TheaterWorkbench() {
       )}
 
       {!isSimulationActive && !simulationReport && (
-        <aside className="env-panel" aria-label="Simulation inputs">
+        <aside className="env-panel" aria-label="Input panel">
           <div className="env-panel__head">
             <div className="env-panel__title-stack">
-              <div className="env-panel__title">Simulation Inputs</div>
+              <div className="env-panel__title">Input Panel</div>
             </div>
             <button type="button" className="env-panel__reset" onClick={resetEnvironment}>
               Default
             </button>
           </div>
           <div className="env-panel__body">
-            <div className="unit-input">
-              <span className="unit-input__label">Unit</span>
-              <div className="unit-input__control" role="group" aria-label="Unit">
-                {VEHICLE_UNIT_OPTIONS.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    className="unit-input__button"
-                    data-active={vehicleId === option.id}
-                    aria-pressed={vehicleId === option.id}
-                    onClick={() => selectVehicleUnit(option.id)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
+            <section className="env-panel__section" aria-labelledby="vehicle-inputs-title">
+              <div className="env-panel__section-title" id="vehicle-inputs-title">
+                Vehicle Inputs
               </div>
-            </div>
-
-            <label className="material-input">
-              <span className="material-input__label">Material</span>
-              <select
-                className="material-input__select"
-                value={environmentParams.material}
-                onChange={(event) => setEnvironmentField("material", event.target.value)}
-              >
-                {MATERIAL_OPTIONS.map((material) => (
-                  <option key={material} value={material}>
-                    {material}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {ENVIRONMENT_FIELDS.map((field) => (
-              <EnvironmentSlider
-                key={field.id}
-                field={field}
-                value={environmentParams[field.id]}
-                onChange={(value) => setEnvironmentField(field.id, value)}
-              />
-            ))}
-
-            <label className="env-duration">
-              <div className="env-duration__top">
-                <span>Simulation duration</span>
-                <span>Default 90</span>
+              <div className="unit-input">
+                <span className="unit-input__label">Unit</span>
+                <div className="unit-input__control" role="group" aria-label="Unit">
+                  {VEHICLE_UNIT_OPTIONS.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className="unit-input__button"
+                      data-active={vehicleId === option.id}
+                      aria-pressed={vehicleId === option.id}
+                      onClick={() => selectVehicleUnit(option.id)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="env-duration__control">
-                <button
-                  type="button"
-                  className="env-duration__step"
-                  onClick={() => adjustDurationDays(-1)}
-                  aria-label="Decrease simulation duration"
+
+              <label className="material-input">
+                <span className="material-input__label">Material</span>
+                <select
+                  className="material-input__select"
+                  value={environmentParams.material}
+                  onChange={(event) => setEnvironmentField("material", event.target.value)}
                 >
-                  -
-                </button>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={environmentParams.durationDays}
-                  onChange={(event) => setDurationDays(event.target.value)}
-                  onBlur={normalizeDurationDays}
+                  {MATERIAL_OPTIONS.map((material) => (
+                    <option key={material} value={material}>
+                      {material}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </section>
+
+            <section
+              className="env-panel__section"
+              aria-labelledby="environmental-conditions-title"
+            >
+              <div className="env-panel__section-title" id="environmental-conditions-title">
+                Environmental Conditions
+              </div>
+              {ENVIRONMENT_FIELDS.map((field) => (
+                <EnvironmentSlider
+                  key={field.id}
+                  field={field}
+                  value={environmentParams[field.id]}
+                  onChange={(value) => setEnvironmentField(field.id, value)}
                 />
-                <button
-                  type="button"
-                  className="env-duration__step"
-                  onClick={() => adjustDurationDays(1)}
-                  aria-label="Increase simulation duration"
-                >
-                  +
-                </button>
-                <span>days</span>
+              ))}
+            </section>
+
+            <section
+              className="env-panel__section env-panel__section--simulation"
+              aria-labelledby="simulation-inputs-title"
+            >
+              <div className="env-panel__section-title" id="simulation-inputs-title">
+                Simulation Inputs
               </div>
-            </label>
+              <label className="env-duration">
+                <div className="env-duration__top">
+                  <span>Simulation duration</span>
+                  <span>Default 90</span>
+                </div>
+                <div className="env-duration__control">
+                  <button
+                    type="button"
+                    className="env-duration__step"
+                    onClick={() => adjustDurationDays(-1)}
+                    aria-label="Decrease simulation duration"
+                  >
+                    -
+                  </button>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={environmentParams.durationDays}
+                    onChange={(event) => setDurationDays(event.target.value)}
+                    onBlur={normalizeDurationDays}
+                  />
+                  <button
+                    type="button"
+                    className="env-duration__step"
+                    onClick={() => adjustDurationDays(1)}
+                    aria-label="Increase simulation duration"
+                  >
+                    +
+                  </button>
+                  <span>days</span>
+                </div>
+              </label>
+
+              <label className="env-duration env-day-step">
+                <div className="env-duration__top">
+                  <span>Day step</span>
+                  <span>Default 6</span>
+                </div>
+                <div className="env-duration__control env-duration__control--single">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={environmentParams.dayStepDaysPerSecond}
+                    onChange={(event) => setDayStepDaysPerSecond(event.target.value)}
+                    onBlur={normalizeDayStepDaysPerSecond}
+                  />
+                  <span>days/sec</span>
+                </div>
+              </label>
+
+              <div className="simulation-estimate" aria-live="polite">
+                <span>Estimated simulation duration</span>
+                <strong>{simulationRunDurationLabel}</strong>
+              </div>
+            </section>
           </div>
         </aside>
       )}
@@ -1195,29 +1638,16 @@ export function TheaterWorkbench() {
       )}
 
       {isSimulationActive && (
-        <VehicleHealthPanel snapshot={vehicleHealthSnapshot} currentDay={currentDay} />
+        <VehicleHealthPanel snapshot={vehicleHealthSnapshot} />
       )}
 
       {isSimulationActive && (
-        <div
-          className="timeline-dock"
-          style={{ "--timeline-duration": `${SIMULATION_RUN_DURATION_MS}ms` }}
-          aria-label="Simulation timeline"
-        >
-          <div
-            className="timeline-dock__progress"
-            role="progressbar"
-            aria-valuemin="1"
-            aria-valuemax={simulationDurationDays}
-            aria-valuenow={currentDay}
-          >
-            <div className="timeline-dock__fill" />
-          </div>
-          <div className="timeline-dock__scale">
-            <span>Day 1</span>
-            <span>Day {simulationDurationDays}</span>
-          </div>
-        </div>
+        <SimulationCalendarPanel
+          currentDay={currentDay}
+          durationDays={simulationDurationDays}
+          runDurationMs={simulationRunDurationMs}
+          startDate={simulationStartDate}
+        />
       )}
     </div>
   );
