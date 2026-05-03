@@ -1,0 +1,11 @@
+{
+  "theater": "taiwan",
+  "lat": 23.7,
+  "lng": 121.0,
+  "aod550": 0.18,
+  "pm25": 14.3,
+  "pm10": 28.6,
+  "dustLoad": "low",
+  "fetchedAt": "stub",
+  "validFor": "stub"
+}

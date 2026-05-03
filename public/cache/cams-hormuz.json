@@ -1,0 +1,11 @@
+{
+  "theater": "hormuz",
+  "lat": 26.0253,
+  "lng": 56.3314,
+  "aod550": 0.62,
+  "pm25": 35.1,
+  "pm10": 142.8,
+  "dustLoad": "high",
+  "fetchedAt": "stub",
+  "validFor": "stub"
+}

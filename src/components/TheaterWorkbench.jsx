@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import initPhysicsEngine, { Engine as PhysicsEngine } from "../../pkg/engine.js";
 import { theaters } from "../data/theaters";
+import { getTheaterSnapshot } from "../services/env";
 import { TheaterEnvironment } from "./TheaterEnvironment";
 import landforgeIcon from "../assets/landforge-icon.png";
 
@@ -59,8 +60,9 @@ const parseDurationDays = (value) => {
   return Number.isFinite(parsed) ? Math.max(1, parsed) : 1;
 };
 
-const SIMULATION_RUN_DURATION_MS = 15000;
-const PHYSICS_DEGRADATION_SCALE = 0.1;
+const LIVE_REFRESH_INTERVAL_MS = 60_000;
+const REALTIME_SIM_DAYS_PER_REAL_SECOND = 0.25;
+const ENGINE_SECONDS_PER_SIM_DAY = 0.1;
 
 let physicsEngineInitPromise = null;
 
@@ -127,6 +129,8 @@ const VEHICLE_HEALTH_GROUPS = [
 ];
 
 const DEFAULT_HEALTH_SNAPSHOT = Object.freeze({
+  frame: 0,
+  elapsed_s: 0,
   vehicle_health: 1,
   subsystems: Object.freeze({
     chassis: 1,
@@ -278,14 +282,41 @@ const buildPhysicsEnvironment = (params) => {
   };
 };
 
-function VehicleHealthPanel({ snapshot }) {
+const mapLiveSnapshotToEnvironmentParams = (snapshot, currentParams) => ({
+  ...currentParams,
+  temperatureF: Math.round(snapshot.weather.tempC * (9 / 5) + 32),
+  // AOD-based dust mapping: aod550=1.0 ~= 8 mg/m3 severe storm baseline.
+  dustMgM3: snapshot.cams
+    ? Math.min(10, Math.round(snapshot.cams.aod550 * 80) / 10)
+    : currentParams.dustMgM3,
+  relativeHumidityPct: Math.round(snapshot.weather.relativeHumidity),
+  uvWm2: Math.round(snapshot.weather.shortwaveRadiationWm2 / 10) * 10,
+});
+
+const formatSimDay = (elapsedDays) => {
+  if (!Number.isFinite(elapsedDays)) return "Day 1";
+  return `Day ${Math.floor(elapsedDays) + 1}`;
+};
+
+function VehicleHealthPanel({ snapshot, runtimeState, simElapsedDays, liveStatus }) {
   const subsystems = snapshot?.subsystems ?? DEFAULT_HEALTH_SNAPSHOT.subsystems;
+  const runtimeLabel =
+    runtimeState === "running" ? "Ticking" : runtimeState === "paused" ? "Paused" : "Idle";
+  const lastRefresh = liveStatus?.snapshot?.retrievedAt
+    ? new Date(liveStatus.snapshot.retrievedAt)
+    : null;
+  const lastRefreshLabel =
+    lastRefresh && !Number.isNaN(lastRefresh.valueOf())
+      ? lastRefresh.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      : "Baseline";
+
   const renderHealthRow = (label, subsystem, className = "health-row") => {
     const health = clampHealthUnit(subsystems[subsystem] ?? snapshot?.vehicle_health ?? 1);
     const healthPercent = health * 100;
+    const tone = health < 0.45 ? "critical" : health < 0.7 ? "watch" : "stable";
 
     return (
-      <div className={className} key={label}>
+      <div className={className} data-tone={tone} key={label}>
         <div className="health-row__top">
           <span>{label}</span>
           <strong>{formatHealthPercent(health)}</strong>
@@ -305,6 +336,13 @@ function VehicleHealthPanel({ snapshot }) {
         <div className="health-panel__overall-top">
           <span>Overall Vehicle Health</span>
           <strong>{formatHealthPercent(overallHealth)}</strong>
+        </div>
+        <div className="health-panel__meta">
+          <span className="health-panel__status" data-state={runtimeState}>
+            {runtimeLabel}
+          </span>
+          <span>{formatSimDay(simElapsedDays)}</span>
+          <span>Env {lastRefreshLabel}</span>
         </div>
         <div className="health-panel__overall-meter" aria-hidden="true">
           <span style={{ "--health": `${overallHealth * 100}%` }} />
@@ -347,22 +385,40 @@ export function TheaterWorkbench() {
 
   const [vehicleId, setVehicleId] = useState("ugv");
   const [runToken, setRunToken] = useState(0);
-  const [isSimulationActive, setIsSimulationActive] = useState(false);
+  const [runtimeState, setRuntimeState] = useState("idle");
   const [currentDay, setCurrentDay] = useState(1);
+  const [simElapsedDays, setSimElapsedDays] = useState(0);
   const [vehicleHealthSnapshot, setVehicleHealthSnapshot] = useState(DEFAULT_HEALTH_SNAPSHOT);
   const physicsEngineRef = useRef(null);
-  const simulationInputsRef = useRef(null);
+  const simElapsedDaysRef = useRef(0);
+  const activeMaterialKeyRef = useRef(null);
   const theaterIdForSim = theater && theater.id !== "custom" ? theater.id : "arctic";
   const [environmentParams, setEnvironmentParams] = useState(() =>
     buildEnvironmentDefaults(theaterIdForSim),
   );
+  const environmentParamsRef = useRef(environmentParams);
+  const [liveStatus, setLiveStatus] = useState({ stage: "idle", error: null, snapshot: null });
+  const isRealtimeActive = runtimeState === "running";
+  const isRealtimePaused = runtimeState === "paused";
+  const simulationDurationDays = parseDurationDays(environmentParams.durationDays);
+  const timelineProgress = Math.min(100, (simElapsedDays / simulationDurationDays) * 100);
 
   useEffect(() => {
-    setEnvironmentParams(buildEnvironmentDefaults(theaterIdForSim));
-    setIsSimulationActive(false);
+    const defaults = buildEnvironmentDefaults(theaterIdForSim);
+    environmentParamsRef.current = defaults;
+    simElapsedDaysRef.current = 0;
+    activeMaterialKeyRef.current = null;
+    setEnvironmentParams(defaults);
+    setRuntimeState("idle");
     setCurrentDay(1);
+    setSimElapsedDays(0);
     setVehicleHealthSnapshot(DEFAULT_HEALTH_SNAPSHOT);
+    setLiveStatus({ stage: "idle", error: null, snapshot: null });
   }, [theaterIdForSim]);
+
+  useEffect(() => {
+    environmentParamsRef.current = environmentParams;
+  }, [environmentParams]);
 
   useEffect(() => {
     let disposed = false;
@@ -385,31 +441,126 @@ export function TheaterWorkbench() {
     };
   }, []);
 
-  const simulationDurationDays = parseDurationDays(environmentParams.durationDays);
+  const applyEnvironmentParams = (nextParams) => {
+    environmentParamsRef.current = nextParams;
+    setEnvironmentParams(nextParams);
+  };
+
+  const getMaterialKey = (params) => MATERIAL_ENGINE_KEYS[params.material] ?? params.material;
+
+  const ensurePhysicsEngine = async () => {
+    await ensurePhysicsEngineRuntime();
+    const engine = physicsEngineRef.current ?? new PhysicsEngine();
+    physicsEngineRef.current = engine;
+    return engine;
+  };
+
+  const configurePhysicsEngine = async (params, { resetHealth = false } = {}) => {
+    const engine = await ensurePhysicsEngine();
+    const materialKey = getMaterialKey(params);
+    if (activeMaterialKeyRef.current !== materialKey) {
+      if (engine.set_material(materialKey)) {
+        activeMaterialKeyRef.current = materialKey;
+      } else {
+        activeMaterialKeyRef.current = null;
+        engine.reset();
+      }
+    } else if (resetHealth) {
+      engine.reset();
+    }
+    return engine;
+  };
+
+  const resetVehicleHealth = async (params = environmentParamsRef.current) => {
+    simElapsedDaysRef.current = 0;
+    setSimElapsedDays(0);
+    setCurrentDay(1);
+    setVehicleHealthSnapshot(DEFAULT_HEALTH_SNAPSHOT);
+
+    try {
+      const engine = await configurePhysicsEngine(params, { resetHealth: true });
+      const snapshot = parsePhysicsSnapshot(engine.get_vehicle());
+      setVehicleHealthSnapshot(snapshot);
+    } catch (error) {
+      console.error("Unable to reset physics engine health", error);
+    }
+  };
+
+  const startRealtime = async ({ resetHealth = false } = {}) => {
+    const durationDays = parseDurationDays(environmentParamsRef.current.durationDays);
+    const normalizedParams = {
+      ...environmentParamsRef.current,
+      durationDays: String(durationDays),
+    };
+    applyEnvironmentParams(normalizedParams);
+
+    try {
+      await configurePhysicsEngine(normalizedParams, { resetHealth });
+      setRuntimeState("running");
+      setRunToken((token) => token + 1);
+    } catch (error) {
+      console.error("Unable to start realtime physics engine", error);
+    }
+  };
+
+  const pauseRealtime = () => {
+    setRuntimeState("paused");
+  };
+
+  const resumeRealtime = async () => {
+    await startRealtime({ resetHealth: false });
+  };
+
+  const fetchAndApplyLiveSnapshot = async ({ stage = "loading", signal } = {}) => {
+    if (!theater) return null;
+    setLiveStatus((current) => ({
+      stage,
+      error: null,
+      snapshot: stage === "refreshing" ? current.snapshot : null,
+    }));
+
+    try {
+      const snap = await getTheaterSnapshot({
+        lat: theater.lat,
+        lng: theater.lng,
+        theaterId: theater.id !== "custom" ? theater.id : undefined,
+        signal,
+      });
+      const nextParams = mapLiveSnapshotToEnvironmentParams(
+        snap,
+        environmentParamsRef.current,
+      );
+      applyEnvironmentParams(nextParams);
+      setLiveStatus({ stage: "done", error: null, snapshot: snap });
+      return nextParams;
+    } catch (error) {
+      if (error?.name === "AbortError") return null;
+      setLiveStatus((current) => ({
+        stage: "idle",
+        error: error instanceof Error ? error.message : String(error),
+        snapshot: current.snapshot,
+      }));
+      return null;
+    }
+  };
 
   useEffect(() => {
-    if (!isSimulationActive) return undefined;
+    if (!isRealtimeActive) return undefined;
 
-    const startedAt = performance.now();
-    let lastSimulatedDay = 0;
     let raf = 0;
-    const physicsEnvironment = buildPhysicsEnvironment(
-      simulationInputsRef.current ?? environmentParams,
-    );
+    let lastNow = performance.now();
 
     const tick = (now) => {
-      const progress = Math.min(1, (now - startedAt) / SIMULATION_RUN_DURATION_MS);
-      const simulatedDay = simulationDurationDays * progress;
-      const dayStep = Math.max(0, simulatedDay - lastSimulatedDay);
-      lastSimulatedDay = simulatedDay;
-
-      setCurrentDay(Math.max(1, Math.round(1 + (simulationDurationDays - 1) * progress)));
+      const elapsedRealSeconds = Math.min(0.25, Math.max(0, (now - lastNow) / 1000));
+      lastNow = now;
 
       const physicsEngine = physicsEngineRef.current;
-      if (physicsEngine && dayStep > 0) {
+      const simDayStep = elapsedRealSeconds * REALTIME_SIM_DAYS_PER_REAL_SECOND;
+      if (physicsEngine && simDayStep > 0) {
+        const physicsEnvironment = buildPhysicsEnvironment(environmentParamsRef.current);
         try {
-          physicsEngine.set_time_step(dayStep * PHYSICS_DEGRADATION_SCALE);
-          setVehicleHealthSnapshot(parsePhysicsSnapshot(
+          physicsEngine.set_time_step(simDayStep * ENGINE_SECONDS_PER_SIM_DAY);
+          const snapshot = parsePhysicsSnapshot(
             physicsEngine.tick(
               physicsEnvironment.temperatureC,
               physicsEnvironment.particulateConcentration,
@@ -417,15 +568,18 @@ export function TheaterWorkbench() {
               physicsEnvironment.salinityConcentration,
               physicsEnvironment.irradiance,
             ),
-          ));
+          );
+          const elapsedDays =
+            Number.isFinite(snapshot.elapsed_s)
+              ? snapshot.elapsed_s / ENGINE_SECONDS_PER_SIM_DAY
+              : simElapsedDaysRef.current + simDayStep;
+          simElapsedDaysRef.current = elapsedDays;
+          setVehicleHealthSnapshot(snapshot);
+          setSimElapsedDays(elapsedDays);
+          setCurrentDay(Math.max(1, Math.floor(elapsedDays) + 1));
         } catch (error) {
           console.error("Unable to tick physics engine", error);
         }
-      }
-
-      if (progress >= 1) {
-        setIsSimulationActive(false);
-        return;
       }
 
       raf = requestAnimationFrame(tick);
@@ -433,59 +587,79 @@ export function TheaterWorkbench() {
     raf = requestAnimationFrame(tick);
 
     return () => cancelAnimationFrame(raf);
-  }, [isSimulationActive, simulationDurationDays]);
+  }, [isRealtimeActive]);
+
+  useEffect(() => {
+    if (!isRealtimeActive || !theater) return undefined;
+
+    let disposed = false;
+    let controller = null;
+    const refreshLiveEnvironment = async () => {
+      controller?.abort();
+      controller = new AbortController();
+      const nextParams = await fetchAndApplyLiveSnapshot({
+        stage: "refreshing",
+        signal: controller.signal,
+      });
+      if (disposed || !nextParams) return;
+    };
+
+    const interval = window.setInterval(refreshLiveEnvironment, LIVE_REFRESH_INTERVAL_MS);
+    return () => {
+      disposed = true;
+      controller?.abort();
+      window.clearInterval(interval);
+    };
+  }, [isRealtimeActive, theater]);
 
   const setEnvironmentField = (fieldId, value) => {
-    setEnvironmentParams((current) => ({ ...current, [fieldId]: value }));
+    const nextParams = { ...environmentParamsRef.current, [fieldId]: value };
+    applyEnvironmentParams(nextParams);
+    if (fieldId === "material") {
+      void resetVehicleHealth(nextParams);
+    }
   };
+
   const resetEnvironment = () => {
-    setEnvironmentParams(buildEnvironmentDefaults(theaterIdForSim));
+    const defaults = buildEnvironmentDefaults(theaterIdForSim);
+    applyEnvironmentParams(defaults);
+    setRuntimeState("idle");
+    setLiveStatus({ stage: "idle", error: null, snapshot: null });
+    void resetVehicleHealth(defaults);
   };
+
+  const runLive = async () => {
+    const nextParams = await fetchAndApplyLiveSnapshot({ stage: "loading" });
+    if (!nextParams) return;
+    await startRealtime({
+      resetHealth: runtimeState === "idle" && (vehicleHealthSnapshot.frame ?? 0) === 0,
+    });
+  };
+
   const setDurationDays = (value) => {
     setEnvironmentField("durationDays", value.replace(/\D/g, ""));
   };
+
   const normalizeDurationDays = () => {
-    setEnvironmentParams((current) => {
-      return { ...current, durationDays: String(parseDurationDays(current.durationDays)) };
-    });
+    const normalizedParams = {
+      ...environmentParamsRef.current,
+      durationDays: String(parseDurationDays(environmentParamsRef.current.durationDays)),
+    };
+    applyEnvironmentParams(normalizedParams);
   };
+
   const adjustDurationDays = (delta) => {
-    setEnvironmentParams((current) => {
-      const currentDays = parseDurationDays(current.durationDays);
-      return { ...current, durationDays: String(Math.max(1, currentDays + delta)) };
+    const currentDays = parseDurationDays(environmentParamsRef.current.durationDays);
+    applyEnvironmentParams({
+      ...environmentParamsRef.current,
+      durationDays: String(Math.max(1, currentDays + delta)),
     });
   };
-  const runSimulation = async () => {
-    const durationDays = parseDurationDays(environmentParams.durationDays);
-    const normalizedParams = { ...environmentParams, durationDays: String(durationDays) };
-    simulationInputsRef.current = normalizedParams;
 
-    setEnvironmentParams(normalizedParams);
-    setCurrentDay(1);
-    setVehicleHealthSnapshot(DEFAULT_HEALTH_SNAPSHOT);
-
-    try {
-      await ensurePhysicsEngineRuntime();
-      const physicsEngine = physicsEngineRef.current ?? new PhysicsEngine();
-      physicsEngineRef.current = physicsEngine;
-      const materialKey =
-        MATERIAL_ENGINE_KEYS[normalizedParams.material] ?? normalizedParams.material;
-      if (!physicsEngine.set_material(materialKey)) {
-        physicsEngine.reset();
-      }
-      setVehicleHealthSnapshot(parsePhysicsSnapshot(physicsEngine.get_vehicle()));
-    } catch (error) {
-      console.error("Unable to start physics engine run", error);
-    }
-
-    setIsSimulationActive(true);
-    setRunToken((token) => token + 1);
-  };
   const selectVehicleUnit = (nextVehicleId) => {
     setVehicleId(nextVehicleId);
-    setCurrentDay(1);
-    setVehicleHealthSnapshot(DEFAULT_HEALTH_SNAPSHOT);
-    setIsSimulationActive(false);
+    setRuntimeState("idle");
+    void resetVehicleHealth(environmentParamsRef.current);
   };
 
   if (!theater) {
@@ -522,7 +696,7 @@ export function TheaterWorkbench() {
           theaterId={theaterIdForSim}
           vehicleId={vehicleId}
           runToken={runToken}
-          simulationActive={isSimulationActive}
+          simulationActive={isRealtimeActive}
         />
       </div>
 
@@ -541,27 +715,81 @@ export function TheaterWorkbench() {
         </button>
       </header>
 
-      {!isSimulationActive && (
-        <div className="run-sim-dock">
-          <button
-            type="button"
-            className="run-sim-button"
-            onClick={runSimulation}
-          >
-            <span>Run Simulation</span>
-          </button>
-        </div>
-      )}
+      <div className="run-sim-dock">
+        <button
+          type="button"
+          className="run-sim-button"
+          onClick={
+            isRealtimeActive
+              ? pauseRealtime
+              : isRealtimePaused
+                ? resumeRealtime
+                : () => startRealtime({ resetHealth: (vehicleHealthSnapshot.frame ?? 0) === 0 })
+          }
+        >
+          <span>
+            {isRealtimeActive ? "Pause" : isRealtimePaused ? "Resume" : "Start Real-time"}
+          </span>
+        </button>
+        <button
+          type="button"
+          className="run-sim-button run-sim-button--secondary"
+          onClick={() => resetVehicleHealth()}
+        >
+          <span>Reset Health</span>
+        </button>
+      </div>
 
-      {!isSimulationActive && (
-        <aside className="env-panel" aria-label="Simulation inputs">
+      <aside className="env-panel" aria-label="Simulation inputs">
           <div className="env-panel__head">
             <div className="env-panel__title-stack">
               <div className="env-panel__title">Simulation Inputs</div>
+              {liveStatus.snapshot && (
+                <div
+                  className="env-panel__subtitle"
+                  style={{ fontSize: "0.72rem", opacity: 0.7, marginTop: 2 }}
+                >
+                  Live · {liveStatus.snapshot.weather.tempC.toFixed(1)}°C · RH{" "}
+                  {Math.round(liveStatus.snapshot.weather.relativeHumidity)}%
+                  {liveStatus.snapshot.cams
+                    ? ` · dust ${liveStatus.snapshot.cams.dustLoad}`
+                    : ""}
+                </div>
+              )}
+              {liveStatus.error && (
+                <div
+                  className="env-panel__subtitle"
+                  style={{ fontSize: "0.72rem", color: "#ff8080", marginTop: 2 }}
+                >
+                  {liveStatus.error}
+                </div>
+              )}
             </div>
-            <button type="button" className="env-panel__reset" onClick={resetEnvironment}>
-              Default
-            </button>
+            <div style={{ display: "flex", gap: "0.4rem" }}>
+              <button
+                type="button"
+                className="env-panel__reset"
+                onClick={resetEnvironment}
+                data-active={liveStatus.stage !== "done"}
+              >
+                Default
+              </button>
+              <button
+                type="button"
+                className="env-panel__reset"
+                onClick={runLive}
+                disabled={liveStatus.stage === "loading" || liveStatus.stage === "refreshing"}
+                data-active={liveStatus.stage === "done"}
+              >
+                {liveStatus.stage === "loading"
+                  ? "Loading..."
+                  : liveStatus.stage === "refreshing"
+                    ? "Refreshing"
+                    : isRealtimeActive && liveStatus.stage === "done"
+                      ? "Live On"
+                      : "Live"}
+              </button>
+            </div>
           </div>
           <div className="env-panel__body">
             <div className="unit-input">
@@ -641,28 +869,32 @@ export function TheaterWorkbench() {
             </label>
           </div>
         </aside>
-      )}
 
-      {isSimulationActive && <VehicleHealthPanel snapshot={vehicleHealthSnapshot} />}
+      <VehicleHealthPanel
+        snapshot={vehicleHealthSnapshot}
+        runtimeState={runtimeState}
+        simElapsedDays={simElapsedDays}
+        liveStatus={liveStatus}
+      />
 
-      {isSimulationActive && (
+      {(runtimeState !== "idle" || simElapsedDays > 0) && (
         <div
           className="timeline-dock"
-          style={{ "--timeline-duration": `${SIMULATION_RUN_DURATION_MS}ms` }}
+          style={{ "--timeline-progress": `${timelineProgress}%` }}
           aria-label="Simulation timeline"
         >
           <div
             className="timeline-dock__progress"
             role="progressbar"
-            aria-valuemin="1"
+            aria-valuemin="0"
             aria-valuemax={simulationDurationDays}
-            aria-valuenow={currentDay}
+            aria-valuenow={Math.min(currentDay, simulationDurationDays)}
           >
             <div className="timeline-dock__fill" />
           </div>
           <div className="timeline-dock__scale">
-            <span>Day 1</span>
-            <span>Day {simulationDurationDays}</span>
+            <span>{formatSimDay(simElapsedDays)}</span>
+            <span>{simulationDurationDays} day reference</span>
           </div>
         </div>
       )}
