@@ -659,6 +659,7 @@ const materialOptionsForComponent = (componentId) => (
 );
 
 const COMPONENT_MATERIAL_PRESETS = [
+  { id: "default", label: "Default" },
   { id: "budget", label: "Budget" },
   { id: "reasonable", label: "Reasonable" },
   { id: "top-notch", label: "Top-Notch" },
@@ -700,15 +701,6 @@ const selectMaterialForPreset = (componentId, materialCatalog, presetId) => {
   return options[0];
 };
 
-const buildComponentMaterialPreset = (presetId, materialCatalog) => (
-  Object.fromEntries(
-    COMPONENT_MATERIAL_ITEMS.map((item) => [
-      item.id,
-      selectMaterialForPreset(item.id, materialCatalog, presetId),
-    ]),
-  )
-);
-
 const normalizeComponentMaterial = (componentId, material, fallbackMaterial) => {
   const options = materialOptionsForComponent(componentId);
   if (options.includes(material)) return material;
@@ -724,6 +716,19 @@ const buildDefaultComponentMaterials = (material) => (
     ]),
   )
 );
+
+const buildComponentMaterialPreset = (presetId, materialCatalog, baseMaterial) => {
+  if (presetId === "default") {
+    return buildDefaultComponentMaterials(baseMaterial);
+  }
+
+  return Object.fromEntries(
+    COMPONENT_MATERIAL_ITEMS.map((item) => [
+      item.id,
+      selectMaterialForPreset(item.id, materialCatalog, presetId),
+    ]),
+  );
+};
 
 const normalizeComponentMaterials = (componentMaterials, fallbackMaterial) => {
   const fallback = MATERIAL_OPTIONS.includes(fallbackMaterial)
@@ -3017,11 +3022,10 @@ function ComponentMaterialPanel({
   materialCatalog,
   costEstimate,
   onChange,
-  onApplyBase,
   onApplyPreset,
 }) {
   const activePresetId = COMPONENT_MATERIAL_PRESETS.find((preset) => {
-    const presetMaterials = buildComponentMaterialPreset(preset.id, materialCatalog);
+    const presetMaterials = buildComponentMaterialPreset(preset.id, materialCatalog, baseMaterial);
     return COMPONENT_MATERIAL_ITEMS.every((item) => (
       componentMaterials[item.id] === presetMaterials[item.id]
     ));
@@ -3033,13 +3037,6 @@ function ComponentMaterialPanel({
         <div>
           <div className="component-material-panel__title">Component Materials</div>
         </div>
-        <button
-          type="button"
-          className="component-material-panel__sync"
-          onClick={onApplyBase}
-        >
-          Apply Base
-        </button>
       </div>
 
       <div className="component-material-panel__summary">
@@ -3846,16 +3843,14 @@ export function TheaterWorkbench() {
       },
     }));
   };
-  const applyBaseMaterialToComponents = () => {
-    setEnvironmentParams((current) => ({
-      ...current,
-      componentMaterials: buildDefaultComponentMaterials(current.material),
-    }));
-  };
   const applyComponentMaterialPreset = (presetId) => {
     setEnvironmentParams((current) => ({
       ...current,
-      componentMaterials: buildComponentMaterialPreset(presetId, materialCatalog),
+      componentMaterials: buildComponentMaterialPreset(
+        presetId,
+        materialCatalog,
+        current.material,
+      ),
     }));
   };
   const resetEnvironment = () => {
@@ -4119,7 +4114,6 @@ export function TheaterWorkbench() {
           materialCatalog={materialCatalog}
           costEstimate={materialCostEstimate}
           onChange={setComponentMaterial}
-          onApplyBase={applyBaseMaterialToComponents}
           onApplyPreset={applyComponentMaterialPreset}
         />
       )}
