@@ -1,27 +1,27 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-export const SAMALAYUCA_DUNE_FIELDS_TOPO_CONFIG = Object.freeze({
-  name: "Samalayuca Dune Fields Topographic Terrain",
+export const IRAN_MARANJAB_DUNE_FIELDS_TOPO_CONFIG = Object.freeze({
+  name: "Iran Maranjab Dune Fields Topographic Terrain",
   center: {
-    latitude: 31.2636,
-    longitude: -106.3953,
+    latitude: 34.3003,
+    longitude: 51.8324,
   },
-  location: "Medanos de Samalayuca, Chihuahuan Desert, Chihuahua, Mexico",
-  centerElevationMetersAsl: 1180,
+  location: "Maranjab Desert / Band-e Rig dune belt, Dasht-e Kavir, Isfahan Province, Iran",
+  centerElevationMetersAsl: 860,
   terrainSizeMeters: 1000,
   verticalExaggeration: 0.75,
   contourIntervalMeters: 25,
   note:
-    "Procedural public terrain model inspired by the Samalayuca dune fields in the Chihuahuan Desert. It is not a surveyed DEM tile.",
+    "Procedural public terrain model inspired by Maranjab and Band-e Rig dunes in Iran's Dasht-e Kavir. It is not a surveyed DEM tile.",
 });
 
-const CONFIG = SAMALAYUCA_DUNE_FIELDS_TOPO_CONFIG;
+const CONFIG = IRAN_MARANJAB_DUNE_FIELDS_TOPO_CONFIG;
 const TERRAIN_SIZE = CONFIG.terrainSizeMeters;
 const HALF_TERRAIN = TERRAIN_SIZE / 2;
 const GRID_SEGMENTS = 220;
 const VERTICAL_EXAGGERATION = CONFIG.verticalExaggeration;
-const SEED = 31263106;
+const SEED = 34300518;
 const FOG_COLOR = 0xdcd2bd;
 const RADIAL_FOG = Object.freeze({
   innerRadiusMeters: 500,
@@ -74,19 +74,9 @@ const MATERIALS = {
     roughness: 0.98,
     metalness: 0,
   }),
-  cactusPad: new THREE.MeshStandardMaterial({
-    color: 0x4f834f,
-    roughness: 0.9,
-    metalness: 0,
-  }),
-  cactusAreole: new THREE.MeshStandardMaterial({
-    color: 0xf1dfbb,
-    roughness: 0.86,
-    metalness: 0,
-  }),
 };
 
-export function createSamalayucaDuneFieldsScene(container = document.body, options = {}) {
+export function createIranMaranjabDuneFieldsScene(container = document.body, options = {}) {
   const target = typeof container === "string" ? document.querySelector(container) : container;
 
   if (!target) {
@@ -129,7 +119,6 @@ export function createSamalayucaDuneFieldsScene(container = document.body, optio
   addDuneCrestLines(scene);
   addRockOutcrops(scene);
   addSparseDesertShrubs(scene);
-  addPricklyPearCacti(scene);
   addFogBoundaryPlane(scene);
   addScaleReference(scene);
   applyRadialFogToScene(scene);
@@ -402,7 +391,7 @@ function addTerrain(scene, terrainData) {
   });
 
   const terrain = new THREE.Mesh(geometry, material);
-  terrain.name = "1 km square Samalayuca dune field topographic terrain";
+  terrain.name = "1 km square Maranjab dune field topographic terrain";
   terrain.receiveShadow = true;
   scene.add(terrain);
 }
@@ -569,7 +558,7 @@ function addRockOutcrops(scene) {
   const geometry = new THREE.CylinderGeometry(1, 1, 1, 8);
   const matrices = [];
   const dummy = new THREE.Object3D();
-  const targetCount = 16;
+  const targetCount = 12;
   let attempts = 0;
 
   while (matrices.length < targetCount && attempts < targetCount * 120) {
@@ -656,130 +645,6 @@ function addSparseDesertShrubs(scene) {
   shrubs.receiveShadow = true;
   matrices.forEach((matrix, index) => shrubs.setMatrixAt(index, matrix));
   scene.add(shrubs);
-}
-
-function addPricklyPearCacti(scene) {
-  const random = mulberry32(SEED + 2026);
-  const padGeometry = new THREE.SphereGeometry(1, 14, 10);
-  const areoleGeometry = new THREE.SphereGeometry(1, 5, 4);
-  const padMatrices = [];
-  const areoleMatrices = [];
-  const dummy = new THREE.Object3D();
-  const targetCount = 58;
-  let attempts = 0;
-
-  while (padMatrices.length < targetCount * 3 && attempts < targetCount * 32) {
-    attempts += 1;
-
-    const x = randomRange(random, -HALF_TERRAIN + 42, HALF_TERRAIN - 42);
-    const z = randomRange(random, -HALF_TERRAIN + 42, HALF_TERRAIN - 42);
-    const slope = terrainSlopeAt(x, z);
-    const valleyScore = duneValleyScoreAt(x, z);
-    const survivalNoise = fbm(x * 0.011 - 21, z * 0.011 + 8, 4);
-
-    if (slope > 0.24) continue;
-    if (survivalNoise < 0.24 && valleyScore < 0.28) continue;
-
-    const ground = renderHeightMetersAt(x, z);
-    const yaw = randomRange(random, 0, Math.PI * 2);
-    const size = randomRange(random, 0.82, 1.32);
-
-    plantPricklyPearCactus(dummy, random, x, ground, z, yaw, size, padMatrices, areoleMatrices);
-  }
-
-  const pads = new THREE.InstancedMesh(padGeometry, MATERIALS.cactusPad, padMatrices.length);
-  pads.name = "prickly pear cactus oval pads";
-  pads.castShadow = true;
-  pads.receiveShadow = true;
-  padMatrices.forEach((matrix, index) => pads.setMatrixAt(index, matrix));
-  scene.add(pads);
-
-  const areoles = new THREE.InstancedMesh(areoleGeometry, MATERIALS.cactusAreole, areoleMatrices.length);
-  areoles.name = "pale prickly pear areoles";
-  areoles.castShadow = true;
-  areoleMatrices.forEach((matrix, index) => areoles.setMatrixAt(index, matrix));
-  scene.add(areoles);
-}
-
-function plantPricklyPearCactus(dummy, random, x, ground, z, yaw, size, padMatrices, areoleMatrices) {
-  const baseHeight = randomRange(random, 4.2, 6.5) * size;
-  const baseWidth = baseHeight * randomRange(random, 0.38, 0.52);
-  const baseThickness = randomRange(random, 0.26, 0.44) * size;
-  const padPlan = [
-    {
-      offsetX: 0,
-      offsetY: baseHeight * 0.52,
-      offsetZ: 0,
-      width: baseWidth,
-      height: baseHeight,
-      thickness: baseThickness,
-      tiltX: randomRange(random, -0.08, 0.08),
-      tiltZ: randomRange(random, -0.1, 0.1),
-    },
-  ];
-
-  const sideCount = 1 + Math.floor(random() * 3);
-  for (let i = 0; i < sideCount; i += 1) {
-    const side = i % 2 === 0 ? -1 : 1;
-    const height = baseHeight * randomRange(random, 0.54, 0.78);
-    const width = height * randomRange(random, 0.4, 0.55);
-    padPlan.push({
-      offsetX: side * baseWidth * randomRange(random, 0.42, 0.64),
-      offsetY: baseHeight * randomRange(random, 0.76, 1.02),
-      offsetZ: randomRange(random, -0.26, 0.26) * size,
-      width,
-      height,
-      thickness: baseThickness * randomRange(random, 0.78, 1.08),
-      tiltX: randomRange(random, -0.18, 0.16),
-      tiltZ: side * randomRange(random, 0.22, 0.46),
-    });
-  }
-
-  for (const pad of padPlan) {
-    addCactusPadMatrix(dummy, padMatrices, x, ground, z, yaw, pad);
-    addCactusAreoleMatrices(dummy, random, areoleMatrices, x, ground, z, yaw, pad);
-  }
-}
-
-function addCactusPadMatrix(dummy, matrices, x, ground, z, yaw, pad) {
-  const world = offsetInYawFrame(x, z, yaw, pad.offsetX, pad.offsetZ);
-  dummy.position.set(world.x, ground + pad.offsetY, world.z);
-  dummy.rotation.set(pad.tiltX, yaw, pad.tiltZ);
-  dummy.scale.set(pad.width / 2, pad.height / 2, pad.thickness);
-  dummy.updateMatrix();
-  matrices.push(dummy.matrix.clone());
-}
-
-function addCactusAreoleMatrices(dummy, random, matrices, x, ground, z, yaw, pad) {
-  const dotCount = 5;
-
-  for (let i = 0; i < dotCount; i += 1) {
-    const localX = randomRange(random, -0.42, 0.42) * pad.width;
-    const localY = randomRange(random, -0.34, 0.36) * pad.height;
-    const localZ = pad.thickness * 1.04;
-
-    if (Math.pow(localX / (pad.width / 2), 2) + Math.pow(localY / (pad.height / 2), 2) > 0.74) {
-      continue;
-    }
-
-    const world = offsetInYawFrame(x, z, yaw, pad.offsetX + localX, pad.offsetZ + localZ);
-    const radius = randomRange(random, 0.035, 0.065);
-    dummy.position.set(world.x, ground + pad.offsetY + localY, world.z);
-    dummy.rotation.set(0, yaw, 0);
-    dummy.scale.set(radius, radius, radius);
-    dummy.updateMatrix();
-    matrices.push(dummy.matrix.clone());
-  }
-}
-
-function offsetInYawFrame(originX, originZ, yaw, localX, localZ) {
-  const cos = Math.cos(yaw);
-  const sin = Math.sin(yaw);
-
-  return {
-    x: originX + localX * cos - localZ * sin,
-    z: originZ + localX * sin + localZ * cos,
-  };
 }
 
 function setMatrix(dummy, x, y, z, yaw, leanX, leanZ, scaleX, scaleY, scaleZ) {
