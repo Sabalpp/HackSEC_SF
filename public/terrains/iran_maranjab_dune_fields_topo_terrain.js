@@ -297,6 +297,34 @@ function duneValleyScoreAt(xMetersEast, zMetersNorth) {
   return Math.pow(swale, 2.4) * duneFieldEnvelopeAt(u, v);
 }
 
+function interduneFloorQualityAt(xMetersEast, zMetersNorth) {
+  const edgeDistance = HALF_TERRAIN - Math.max(Math.abs(xMetersEast), Math.abs(zMetersNorth));
+  if (edgeDistance < 50) return 0;
+
+  const valleyScore = duneValleyScoreAt(xMetersEast, zMetersNorth);
+  if (valleyScore < 0.68) return 0;
+
+  const slope = terrainSlopeAt(xMetersEast, zMetersNorth);
+  if (slope > 0.09) return 0;
+
+  const { u, v } = desertFrame(xMetersEast, zMetersNorth);
+  const leftShoulder = fromDesertFrame(u - 38, v);
+  const rightShoulder = fromDesertFrame(u + 38, v);
+  const floorElevation = terrainElevationMetersAt(xMetersEast, zMetersNorth);
+  const sideRise = Math.min(
+    terrainElevationMetersAt(leftShoulder.x, leftShoulder.z) - floorElevation,
+    terrainElevationMetersAt(rightShoulder.x, rightShoulder.z) - floorElevation,
+  );
+
+  if (sideRise < 0.8) return 0;
+
+  const edgeScore = THREE.MathUtils.clamp((edgeDistance - 50) / 130, 0, 1);
+  const flatScore = THREE.MathUtils.clamp((0.09 - slope) / 0.09, 0, 1);
+  const pocketScore = THREE.MathUtils.clamp(sideRise / 5.2, 0, 1);
+
+  return (valleyScore * 0.55 + flatScore * 0.25 + pocketScore * 0.2) * edgeScore;
+}
+
 function addLighting(scene) {
   const hemisphere = new THREE.HemisphereLight(0xfff0d8, 0x8a6f52, 1.72);
   scene.add(hemisphere);
@@ -556,40 +584,53 @@ function addDuneCrestLines(scene) {
 
 function addRockOutcrops(scene) {
   const random = mulberry32(SEED + 910);
-  const geometry = new THREE.CylinderGeometry(1, 1, 1, 8);
+  const geometry = new THREE.CylinderGeometry(1, 1, 1, 10);
   const matrices = [];
+  const selected = [];
+  const candidates = [];
   const dummy = new THREE.Object3D();
-  const targetCount = 12;
-  let attempts = 0;
+  const targetCount = 8;
 
-  while (matrices.length < targetCount && attempts < targetCount * 120) {
-    attempts += 1;
+  for (let z = -HALF_TERRAIN + 58; z <= HALF_TERRAIN - 58; z += 26) {
+    for (let x = -HALF_TERRAIN + 58; x <= HALF_TERRAIN - 58; x += 26) {
+      const jitteredX = x + randomRange(random, -7, 7);
+      const jitteredZ = z + randomRange(random, -7, 7);
+      const quality = interduneFloorQualityAt(jitteredX, jitteredZ);
 
-    const x = randomRange(random, -HALF_TERRAIN + 24, HALF_TERRAIN - 24);
-    const z = randomRange(random, -HALF_TERRAIN + 24, HALF_TERRAIN - 24);
-    const valleyScore = duneValleyScoreAt(x, z);
+      if (quality < 0.42) continue;
+      if (fbm(jitteredX * 0.018 + 5, jitteredZ * 0.018 - 11, 3) < 0.55) continue;
 
-    if (valleyScore < 0.62) continue;
+      candidates.push({
+        x: jitteredX,
+        z: jitteredZ,
+        quality: quality + random() * 0.08,
+      });
+    }
+  }
 
-    const slope = terrainSlopeAt(x, z);
+  candidates.sort((a, b) => b.quality - a.quality);
 
-    if (slope > 0.11) continue;
-    if (fbm(x * 0.018 + 5, z * 0.018 - 11, 3) < 0.48) continue;
+  for (const candidate of candidates) {
+    if (matrices.length >= targetCount) break;
+    if (selected.some((position) => Math.hypot(position.x - candidate.x, position.z - candidate.z) < 115)) {
+      continue;
+    }
 
-    const y = renderHeightMetersAt(x, z);
-    const longAxis = randomRange(random, 2.6, 7.2);
-    const heightAxis = randomRange(random, 0.08, 0.22);
-    const depthAxis = randomRange(random, 1.2, 3.8);
+    const y = renderHeightMetersAt(candidate.x, candidate.z);
+    const longAxis = randomRange(random, 1.6, 4.9);
+    const heightAxis = randomRange(random, 0.035, 0.095);
+    const depthAxis = randomRange(random, 0.8, 2.2);
 
-    dummy.position.set(x, y + heightAxis / 2 + 0.08, z);
-    dummy.rotation.set(randomRange(random, -0.045, 0.045), randomRange(random, 0, Math.PI * 2), randomRange(random, -0.045, 0.045));
+    dummy.position.set(candidate.x, y + heightAxis / 2 + 0.035, candidate.z);
+    dummy.rotation.set(randomRange(random, -0.012, 0.012), randomRange(random, 0, Math.PI * 2), randomRange(random, -0.012, 0.012));
     dummy.scale.set(longAxis, heightAxis, depthAxis);
     dummy.updateMatrix();
     matrices.push(dummy.matrix.clone());
+    selected.push(candidate);
   }
 
   const rocks = new THREE.InstancedMesh(geometry, MATERIALS.rock, matrices.length);
-  rocks.name = "sparse flat stones in interdune valley bottoms";
+  rocks.name = "very sparse flat stones in interdune valley bottoms";
   rocks.castShadow = true;
   rocks.receiveShadow = true;
   matrices.forEach((matrix, index) => rocks.setMatrixAt(index, matrix));
@@ -598,50 +639,51 @@ function addRockOutcrops(scene) {
 
 function addSparseDesertShrubs(scene) {
   const random = mulberry32(SEED + 1204);
-  const tuftGeometry = new THREE.ConeGeometry(1, 1, 7);
+  const tuftGeometry = new THREE.SphereGeometry(1, 8, 5);
   const matrices = [];
   const dummy = new THREE.Object3D();
-  const targetCount = 38;
+  const targetCount = 24;
   let attempts = 0;
 
-  while (matrices.length < targetCount && attempts < targetCount * 22) {
+  while (matrices.length < targetCount && attempts < targetCount * 34) {
     attempts += 1;
 
     const x = randomRange(random, -HALF_TERRAIN + 34, HALF_TERRAIN - 34);
     const z = randomRange(random, -HALF_TERRAIN + 34, HALF_TERRAIN - 34);
     const { u, v } = desertFrame(x, z);
     const slope = terrainSlopeAt(x, z);
-    const valleyScore = duneValleyScoreAt(x, z);
+    const floorQuality = interduneFloorQualityAt(x, z);
     const washBias =
       Math.exp(-Math.pow((u + 165) / 70, 2)) +
       Math.exp(-Math.pow((u - 215) / 66, 2));
     const survivalNoise = fbm(x * 0.018 + 31, z * 0.018 - 18, 4);
 
-    if (slope > 0.22) continue;
-    if (valleyScore < 0.16 && washBias < 0.22) continue;
-    if (survivalNoise < 0.52) continue;
+    if (slope > 0.12) continue;
+    if (floorQuality < 0.22 && washBias < 0.42) continue;
+    if (survivalNoise < 0.56) continue;
 
     const ground = renderHeightMetersAt(x, z);
-    const height = randomRange(random, 0.9, 2.3);
-    const radius = randomRange(random, 0.85, 1.9);
+    const height = randomRange(random, 0.12, 0.38);
+    const radiusX = randomRange(random, 0.75, 1.55);
+    const radiusZ = randomRange(random, 0.55, 1.35);
 
     setMatrix(
       dummy,
       x,
-      ground + height / 2 + 0.1,
+      ground + height + 0.05,
       z,
       randomRange(random, 0, Math.PI * 2),
-      randomRange(random, -0.12, 0.12),
-      randomRange(random, -0.12, 0.12),
-      radius,
+      randomRange(random, -0.04, 0.04),
+      randomRange(random, -0.04, 0.04),
+      radiusX,
       height,
-      radius,
+      radiusZ,
     );
     matrices.push(dummy.matrix.clone());
   }
 
   const shrubs = new THREE.InstancedMesh(tuftGeometry, MATERIALS.dryShrub, matrices.length);
-  shrubs.name = "sparse desert shrub tufts";
+  shrubs.name = "sparse low desert shrub pads";
   shrubs.castShadow = true;
   shrubs.receiveShadow = true;
   matrices.forEach((matrix, index) => shrubs.setMatrixAt(index, matrix));
