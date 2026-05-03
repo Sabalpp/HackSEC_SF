@@ -649,37 +649,72 @@ function plantSnowToppedPine(
 ) {
   const ground = renderHeightMetersAt(x, z);
   const heightPenalty = THREE.MathUtils.clamp((elevation - 12) / 95, 0, 0.36);
-  const totalHeight = randomRange(random, 6.8, 15.8) * (1 - heightPenalty);
-  const trunkHeight = totalHeight * randomRange(random, 0.22, 0.29);
-  const trunkRadius = randomRange(random, 0.34, 0.62);
+  const heightT = Math.pow(random(), 0.72);
+  const totalHeight = THREE.MathUtils.lerp(5.4, 18.8, heightT) * (1 - heightPenalty);
+  const crownSpread = randomRange(random, 0.78, 1.34) * (1 - heightPenalty * 0.18);
+  const crownOvalX = randomRange(random, 0.78, 1.28);
+  const crownOvalZ = randomRange(random, 0.76, 1.24);
+  const layerJitter = totalHeight * randomRange(random, 0.008, 0.03);
+  const trunkHeight = totalHeight * randomRange(random, 0.18, 0.34);
+  const trunkRadius = THREE.MathUtils.clamp(totalHeight * randomRange(random, 0.032, 0.052), 0.24, 0.82);
+  const trunkOval = randomRange(random, 0.82, 1.18);
   const yaw = randomRange(random, 0, Math.PI * 2);
-  const leanX = randomRange(random, -0.035, 0.035);
-  const leanZ = randomRange(random, -0.035, 0.035);
+  const leanDirection = randomRange(random, 0, Math.PI * 2);
+  const leanMagnitude = randomRange(random, 0.01, 0.065) * (1 + heightPenalty * 0.5);
+  const leanX = Math.cos(leanDirection) * leanMagnitude;
+  const leanZ = Math.sin(leanDirection) * leanMagnitude;
 
-  setMatrix(dummy, x, ground + trunkHeight / 2, z, yaw, leanX, leanZ, trunkRadius, trunkHeight, trunkRadius);
+  setMatrix(
+    dummy,
+    x,
+    ground + trunkHeight / 2,
+    z,
+    yaw,
+    leanX,
+    leanZ,
+    trunkRadius * trunkOval,
+    trunkHeight,
+    trunkRadius / trunkOval,
+  );
   trunkMatrices.push(dummy.matrix.clone());
+
+  const lowerRadius = totalHeight * randomRange(random, 0.135, 0.225) * crownSpread;
+  const middleRadius = totalHeight * randomRange(random, 0.095, 0.165) * crownSpread;
+  const upperRadius = totalHeight * randomRange(random, 0.062, 0.125) * crownSpread;
 
   const layers = [
     {
-      bottom: ground + trunkHeight * 0.42,
-      height: totalHeight * 0.5,
-      radius: totalHeight * randomRange(random, 0.15, 0.19),
-      snowHeight: totalHeight * 0.22,
-      snowRadiusFactor: 0.76,
+      bottom: ground + trunkHeight * randomRange(random, 0.3, 0.56),
+      height: totalHeight * randomRange(random, 0.43, 0.58),
+      radiusX: lowerRadius * crownOvalX * randomRange(random, 0.88, 1.16),
+      radiusZ: lowerRadius * crownOvalZ * randomRange(random, 0.86, 1.18),
+      snowHeight: totalHeight * randomRange(random, 0.13, 0.25),
+      snowRadiusFactor: randomRange(random, 0.62, 0.84),
+      yawOffset: randomRange(random, -0.28, 0.28),
+      offsetX: randomRange(random, -layerJitter, layerJitter),
+      offsetZ: randomRange(random, -layerJitter, layerJitter),
     },
     {
-      bottom: ground + trunkHeight + totalHeight * 0.13,
-      height: totalHeight * 0.41,
-      radius: totalHeight * randomRange(random, 0.115, 0.15),
-      snowHeight: totalHeight * 0.2,
-      snowRadiusFactor: 0.78,
+      bottom: ground + trunkHeight + totalHeight * randomRange(random, 0.08, 0.18),
+      height: totalHeight * randomRange(random, 0.34, 0.48),
+      radiusX: middleRadius * crownOvalX * randomRange(random, 0.82, 1.18),
+      radiusZ: middleRadius * crownOvalZ * randomRange(random, 0.84, 1.18),
+      snowHeight: totalHeight * randomRange(random, 0.12, 0.23),
+      snowRadiusFactor: randomRange(random, 0.66, 0.88),
+      yawOffset: randomRange(random, -0.35, 0.35),
+      offsetX: randomRange(random, -layerJitter, layerJitter),
+      offsetZ: randomRange(random, -layerJitter, layerJitter),
     },
     {
-      bottom: ground + trunkHeight + totalHeight * 0.34,
-      height: totalHeight * 0.36,
-      radius: totalHeight * randomRange(random, 0.08, 0.105),
-      snowHeight: totalHeight * 0.2,
-      snowRadiusFactor: 0.86,
+      bottom: ground + trunkHeight + totalHeight * randomRange(random, 0.28, 0.4),
+      height: totalHeight * randomRange(random, 0.28, 0.42),
+      radiusX: upperRadius * crownOvalX * randomRange(random, 0.76, 1.22),
+      radiusZ: upperRadius * crownOvalZ * randomRange(random, 0.78, 1.22),
+      snowHeight: totalHeight * randomRange(random, 0.11, 0.22),
+      snowRadiusFactor: randomRange(random, 0.72, 0.94),
+      yawOffset: randomRange(random, -0.42, 0.42),
+      offsetX: randomRange(random, -layerJitter, layerJitter),
+      offsetZ: randomRange(random, -layerJitter, layerJitter),
     },
   ];
 
@@ -689,13 +724,17 @@ function plantSnowToppedPine(
 }
 
 function addTreeLayerMatrix(dummy, needleMatrices, snowMatrices, layer, x, z, yaw, leanX, leanZ) {
+  const layerX = x + layer.offsetX;
+  const layerZ = z + layer.offsetZ;
+  const layerYaw = yaw + layer.yawOffset;
   const centerY = layer.bottom + layer.height / 2;
-  setMatrix(dummy, x, centerY, z, yaw, leanX, leanZ, layer.radius, layer.height, layer.radius);
+  setMatrix(dummy, layerX, centerY, layerZ, layerYaw, leanX, leanZ, layer.radiusX, layer.height, layer.radiusZ);
   needleMatrices.push(dummy.matrix.clone());
 
   const snowY = layer.bottom + layer.height - layer.snowHeight / 2 + 0.04;
-  const snowRadius = layer.radius * layer.snowRadiusFactor;
-  setMatrix(dummy, x, snowY, z, yaw, leanX, leanZ, snowRadius, layer.snowHeight, snowRadius);
+  const snowRadiusX = layer.radiusX * layer.snowRadiusFactor;
+  const snowRadiusZ = layer.radiusZ * layer.snowRadiusFactor;
+  setMatrix(dummy, layerX, snowY, layerZ, layerYaw, leanX, leanZ, snowRadiusX, layer.snowHeight, snowRadiusZ);
   snowMatrices.push(dummy.matrix.clone());
 }
 
