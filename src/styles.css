@@ -260,6 +260,28 @@ img { display: block; }
   backdrop-filter: blur(4px);
 }
 .wb-environment__placeholder strong { color: var(--text); display: block; margin-bottom: 6px; }
+.theater-environment {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.theater-environment__terrain {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  pointer-events: none;
+  filter: saturate(0.92) contrast(1.04);
+}
+.theater-environment__scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(5,8,16,0.42), transparent 28%, transparent 70%, rgba(5,8,16,0.54)),
+    linear-gradient(180deg, rgba(5,8,16,0.46), transparent 34%, rgba(5,8,16,0.3));
+}
 .lf-vehicle-scene { position: absolute; inset: 0; }
 .lf-vehicle-scene canvas {
   display: block;

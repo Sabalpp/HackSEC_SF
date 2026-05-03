@@ -7,7 +7,7 @@ import { VehiclePicker } from "./VehiclePicker";
 import { ConditionControls } from "./ConditionControls";
 import { MetricsPanel } from "./MetricsPanel";
 import { AssessmentCards } from "./AssessmentCards";
-import { VehicleScene } from "./VehicleScene";
+import { TheaterEnvironment } from "./TheaterEnvironment";
 import landforgeIcon from "../assets/landforge-icon.png";
 
 const formatCoord = (n) => `${n >= 0 ? "" : "-"}${Math.abs(n).toFixed(2)}°`;
@@ -95,7 +95,7 @@ export function TheaterWorkbench() {
   return (
     <div className="wb-full">
       <div className="wb-environment">
-        <VehicleScene vehicleId={vehicleId} />
+        <TheaterEnvironment theaterId={theaterIdForSim} vehicleId={vehicleId} />
       </div>
 
       <header className="wb-overlay-top">

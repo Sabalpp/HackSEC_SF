@@ -1,13 +1,13 @@
 export const theaters = {
   arctic: {
     id: "arctic",
-    label: "Arctic Corridor",
-    shortLabel: "Arctic",
-    region: "High-latitude land route",
-    lat: 68.35,
-    lng: -133.72,
+    label: "Thompson Pass",
+    shortLabel: "Alaska",
+    region: "Chugach Mountains, Alaska",
+    lat: 61.13130296,
+    lng: -145.7367325,
     intro:
-      "Cold-soak battery drain, snow traction, and limited recovery windows dominate ground-system performance.",
+      "Alpine snowpack, pass-road exposure, and steep Chugach terrain dominate autonomous mobility risk.",
     dominantStress: "thermal",
     accent: "#88d1ff",
   },

@@ -18,7 +18,7 @@ function getFactory(vehicleId) {
   return ns && typeof ns[cfg.factoryKey] === "function" ? ns[cfg.factoryKey] : null;
 }
 
-export function VehicleScene({ vehicleId }) {
+export function VehicleScene({ vehicleId, terrainBacked = false }) {
   const mountRef = useRef(null);
 
   useEffect(() => {
@@ -49,11 +49,11 @@ export function VehicleScene({ vehicleId }) {
     const ground = new THREE.Mesh(
       new THREE.CircleGeometry(8, 96),
       new THREE.MeshStandardMaterial({
-        color: 0x0a1226,
+        color: terrainBacked ? 0x0b1119 : 0x0a1226,
         metalness: 0.0,
         roughness: 0.95,
         transparent: true,
-        opacity: 0.55,
+        opacity: terrainBacked ? 0.18 : 0.55,
       }),
     );
     ground.rotation.x = -Math.PI / 2;
@@ -65,8 +65,8 @@ export function VehicleScene({ vehicleId }) {
       c.width = c.height = 256;
       const ctx = c.getContext("2d");
       const grad = ctx.createRadialGradient(128, 128, 8, 128, 128, 128);
-      grad.addColorStop(0, "rgba(125,211,252,0.55)");
-      grad.addColorStop(0.55, "rgba(125,211,252,0.10)");
+      grad.addColorStop(0, terrainBacked ? "rgba(125,211,252,0.38)" : "rgba(125,211,252,0.55)");
+      grad.addColorStop(0.55, terrainBacked ? "rgba(125,211,252,0.08)" : "rgba(125,211,252,0.10)");
       grad.addColorStop(1, "rgba(125,211,252,0.0)");
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, 256, 256);
@@ -195,7 +195,7 @@ export function VehicleScene({ vehicleId }) {
         }
       });
     };
-  }, [vehicleId]);
+  }, [terrainBacked, vehicleId]);
 
   return <div ref={mountRef} className="lf-vehicle-scene" />;
 }
