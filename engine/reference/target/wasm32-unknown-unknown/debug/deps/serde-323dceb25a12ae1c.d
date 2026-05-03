@@ -1,0 +1,12 @@
+/Users/shashvathsrivatsa/Code/typescript/seaforge/target/wasm32-unknown-unknown/debug/deps/serde-323dceb25a12ae1c.d: /Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/shashvathsrivatsa/Code/typescript/seaforge/target/wasm32-unknown-unknown/debug/build/serde-45af645f3fb8d3e3/out/private.rs
+
+/Users/shashvathsrivatsa/Code/typescript/seaforge/target/wasm32-unknown-unknown/debug/deps/libserde-323dceb25a12ae1c.rmeta: /Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/shashvathsrivatsa/Code/typescript/seaforge/target/wasm32-unknown-unknown/debug/build/serde-45af645f3fb8d3e3/out/private.rs
+
+/Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/Users/shashvathsrivatsa/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/Users/shashvathsrivatsa/Code/typescript/seaforge/target/wasm32-unknown-unknown/debug/build/serde-45af645f3fb8d3e3/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/shashvathsrivatsa/Code/typescript/seaforge/target/wasm32-unknown-unknown/debug/build/serde-45af645f3fb8d3e3/out

@@ -5,11 +5,12 @@ import {
   terrainNormalAt,
 } from "../terrains/taiwan_humid_topo_terrain";
 
-export function TaiwanHumidVehicleScene({ vehicleId, runToken }) {
+export function TaiwanHumidVehicleScene({ vehicleId, runToken, simulationActive }) {
   return (
     <MappedTerrainVehicleScene
       vehicleId={vehicleId}
       runToken={runToken}
+      simulationActive={simulationActive}
       effectType="mist"
       addWorld={addTaiwanHumidTopoWorld}
       renderHeightMetersAt={renderHeightMetersAt}

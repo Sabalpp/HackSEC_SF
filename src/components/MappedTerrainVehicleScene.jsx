@@ -13,7 +13,6 @@ const VEHICLE_FACTORIES = {
 const DEFAULT_DEPLOYMENT_POINT = Object.freeze({ x: 0, z: 0 });
 const VEHICLE_ALTITUDE = Object.freeze({ ugv: 0.08, drone: 8 });
 const VEHICLE_SPEED = Object.freeze({ ugv: 1.6, drone: 5.5 });
-const RUN_DURATION_SECONDS = 13;
 const DEFAULT_ROUTE_OFFSETS = Object.freeze([
   Object.freeze({ x: -12, z: -8 }),
   Object.freeze({ x: 8, z: -12 }),
@@ -108,33 +107,19 @@ function createRoute(deploymentPoint, routeOffsets) {
     deploymentPoint.x + point.x,
     deploymentPoint.z + point.z,
   ));
-  const segments = [];
-  let totalLength = 0;
+  const start = points[0] ?? new THREE.Vector2(deploymentPoint.x, deploymentPoint.z);
+  const next = points.find((point) => point.distanceToSquared(start) > 0.000001)
+    ?? start.clone().add(new THREE.Vector2(1, 0));
+  const tangent = next.clone().sub(start).normalize();
 
-  for (let i = 0; i < points.length; i += 1) {
-    const from = points[i];
-    const to = points[(i + 1) % points.length];
-    const length = from.distanceTo(to);
-    segments.push({ from, to, length, start: totalLength });
-    totalLength += length;
-  }
-
-  return { segments, totalLength };
+  return { start, tangent };
 }
 
 function sampleRoute(route, distanceMeters) {
-  const wrapped = ((distanceMeters % route.totalLength) + route.totalLength) % route.totalLength;
-  const segment = route.segments.find((s) => wrapped >= s.start && wrapped <= s.start + s.length)
-    ?? route.segments[0];
-  const local = segment.length > 0 ? (wrapped - segment.start) / segment.length : 0;
-  const x = THREE.MathUtils.lerp(segment.from.x, segment.to.x, local);
-  const z = THREE.MathUtils.lerp(segment.from.y, segment.to.y, local);
-  const tangent = new THREE.Vector2(
-    segment.to.x - segment.from.x,
-    segment.to.y - segment.from.y,
-  ).normalize();
+  const x = route.start.x + route.tangent.x * distanceMeters;
+  const z = route.start.y + route.tangent.y * distanceMeters;
 
-  return { x, z, tangent };
+  return { x, z, tangent: route.tangent };
 }
 
 function setForwardUpQuaternion(object, forward, up) {
@@ -253,6 +238,7 @@ function createContactEffect(effectType) {
 export function MappedTerrainVehicleScene({
   vehicleId,
   runToken = 0,
+  simulationActive = false,
   effectType = "dust",
   addWorld,
   renderHeightMetersAt,
@@ -262,6 +248,11 @@ export function MappedTerrainVehicleScene({
   routeOffsets = DEFAULT_ROUTE_OFFSETS,
 }) {
   const mountRef = useRef(null);
+  const simulationActiveRef = useRef(simulationActive);
+
+  useEffect(() => {
+    simulationActiveRef.current = simulationActive;
+  }, [simulationActive]);
 
   useEffect(() => {
     const mountEl = mountRef.current;
@@ -356,18 +347,17 @@ export function MappedTerrainVehicleScene({
     let raf = 0;
     let last = performance.now();
     let routeDistance = 0;
-    let runElapsed = 0;
     let runActive = runToken > 0;
     function tick(now) {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
 
+      if (!simulationActiveRef.current) {
+        runActive = false;
+      }
+
       if (runActive) {
         routeDistance += speed * dt;
-        runElapsed += dt;
-        if (runElapsed >= RUN_DURATION_SECONDS) {
-          runActive = false;
-        }
       }
 
       const routeSample = sampleRoute(route, routeDistance);
