@@ -260,29 +260,17 @@ img { display: block; }
   backdrop-filter: blur(4px);
 }
 .wb-environment__placeholder strong { color: var(--text); display: block; margin-bottom: 6px; }
-.theater-environment {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-}
-.theater-environment__terrain {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  pointer-events: none;
-  filter: saturate(0.92) contrast(1.04);
-}
-.theater-environment__scrim {
+.lf-vehicle-scene,
+.thompson-pass-scene { position: absolute; inset: 0; }
+.thompson-pass-scene::after {
+  content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(90deg, rgba(5,8,16,0.42), transparent 28%, transparent 70%, rgba(5,8,16,0.54)),
-    linear-gradient(180deg, rgba(5,8,16,0.46), transparent 34%, rgba(5,8,16,0.3));
+    linear-gradient(90deg, rgba(5,8,16,0.32), transparent 30%, transparent 72%, rgba(5,8,16,0.38)),
+    linear-gradient(180deg, rgba(5,8,16,0.24), transparent 36%, rgba(5,8,16,0.2));
 }
-.lf-vehicle-scene { position: absolute; inset: 0; }
 .lf-vehicle-scene canvas {
   display: block;
   width: 100%;
@@ -290,7 +278,15 @@ img { display: block; }
   cursor: grab;
   touch-action: none;
 }
-.lf-vehicle-scene canvas:active { cursor: grabbing; }
+.thompson-pass-scene canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+.lf-vehicle-scene canvas:active,
+.thompson-pass-scene canvas:active { cursor: grabbing; }
 
 /* ---- Top overlay (brand + back) ---- */
 .wb-overlay-top {
