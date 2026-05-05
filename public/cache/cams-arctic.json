@@ -1,0 +1,11 @@
+{
+  "theater": "arctic",
+  "lat": 68.35,
+  "lng": -133.72,
+  "aod550": 0.05,
+  "pm25": 3.2,
+  "pm10": 8.4,
+  "dustLoad": "low",
+  "fetchedAt": "stub",
+  "validFor": "stub"
+}

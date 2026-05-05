@@ -3,11 +3,12 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { theaters } from "../data/theaters";
 import { vehicles } from "../data/vehicles";
 import { useLandForge } from "../hooks/useLandForge";
+import { useLiveBriefing } from "../hooks/useLiveBriefing";
 import { VehiclePicker } from "./VehiclePicker";
 import { ConditionControls } from "./ConditionControls";
 import { MetricsPanel } from "./MetricsPanel";
 import { AssessmentCards } from "./AssessmentCards";
-import { VehicleScene } from "./VehicleScene";
+import { TerrainVehicleScene } from "./TerrainVehicleScene";
 import landforgeIcon from "../assets/landforge-icon.png";
 
 const formatCoord = (n) => `${n >= 0 ? "" : "-"}${Math.abs(n).toFixed(2)}°`;
@@ -49,13 +50,24 @@ export function TheaterWorkbench() {
   }, [theaterId, searchParams]);
 
   const [vehicleId, setVehicleId] = useState("ugv");
+  const [runToken, setRunToken] = useState(0);
   const vehicle = vehicles[vehicleId];
 
   const theaterIdForSim = theater && theater.id !== "custom" ? theater.id : "arctic";
-  const { input, output, setField } = useLandForge({
+  const { input, output, setField, reset } = useLandForge({
     theater: theaterIdForSim,
     vehicle: vehicleId,
   });
+
+  const briefing = useLiveBriefing({
+    lat: theater?.lat ?? 0,
+    lng: theater?.lng ?? 0,
+    theaterId: theater && theater.id !== "custom" ? theater.id : undefined,
+    input,
+    setField,
+  });
+
+  const cardsToShow = briefing.enrichedCards ?? output.cards;
 
   const [open, setOpen] = useState({
     vehicle: false,
@@ -95,7 +107,11 @@ export function TheaterWorkbench() {
   return (
     <div className="wb-full">
       <div className="wb-environment">
-        <VehicleScene vehicleId={vehicleId} />
+        <TerrainVehicleScene
+          theaterId={theaterIdForSim}
+          vehicleId={vehicleId}
+          runToken={runToken}
+        />
       </div>
 
       <header className="wb-overlay-top">
@@ -110,6 +126,13 @@ export function TheaterWorkbench() {
             <div className="brand__eyebrow">{theater.region}</div>
             <div className="brand__name">{theater.label}</div>
           </div>
+        </button>
+        <button
+          type="button"
+          className="run-sim-button"
+          onClick={() => setRunToken((token) => token + 1)}
+        >
+          Run Simulation
         </button>
       </header>
 
@@ -139,7 +162,15 @@ export function TheaterWorkbench() {
             <button className="wb-panel__close" onClick={() => togglePanel("conditions")}>×</button>
           </div>
           <div className="wb-panel__body">
-            <ConditionControls input={input} setField={setField} />
+            <ConditionControls
+              input={input}
+              setField={setField}
+              briefing={briefing}
+              onDefault={() => {
+                reset();
+                briefing.clear();
+              }}
+            />
           </div>
         </aside>
       )}
@@ -155,7 +186,7 @@ export function TheaterWorkbench() {
             <button className="wb-panel__close" onClick={() => togglePanel("report")}>×</button>
           </div>
           <div className="wb-panel__body">
-            <AssessmentCards cards={output.cards} />
+            <AssessmentCards cards={cardsToShow} />
           </div>
         </aside>
       )}

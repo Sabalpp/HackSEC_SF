@@ -16,8 +16,8 @@ export const theaters = {
     label: "Hormuz Coast",
     shortLabel: "Hormuz",
     region: "Persian Gulf desert littoral",
-    lat: 25.65,
-    lng: 56.25,
+    lat: 26.0253,
+    lng: 56.3314,
     intro:
       "Sand traction loss, dust-loaded sensor degradation, and heat-driven battery loss compress operational windows.",
     dominantStress: "thermal",
